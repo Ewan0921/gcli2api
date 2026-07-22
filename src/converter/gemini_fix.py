@@ -591,7 +591,7 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
     # ========== 新 CLI 模式: 基于思考预算/等级 ==========
 
     # Gemini 3 Preview 系列: 使用 thinkingLevel
-    if "gemini-3" in base_model or "gemini-3.5" in base_model:
+    if "gemini-3" in base_model or "gemini-3.5" in base_model or "gemini-3.6" in base_model:
         if "-high" in model_name:
             return None, "HIGH"
         elif "-medium" in model_name:
@@ -658,7 +658,8 @@ def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str],
         "gemini-3-flash", "gemini-3-flash-agent",
         "gemini-3.1-pro-low", "gemini-pro-agent",
         "gemini-3.1-flash-lite", "gemini-3.1-flash-image",
-        "gemini-3.5-flash-low", "gemini-3.5-flash-extra-low",
+        "gemini-3.5-flash-low", "gemini-3.5-flash-extra-low", "gemini-3.5-flash-high",
+        "gemini-3.6-flash-high", "gemini-3.6-flash-low", "gemini-3.6-flash-extra-low",
         "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-thinking",
         "tab_flash_lite_preview", "tab_jump_flash_lite_preview", "gpt-oss-120b-medium",
         "chat_20706", "chat_23310"
@@ -685,6 +686,14 @@ def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str],
             return "gemini-3.5-flash-low"
         elif "-high" in model_lower:
             return "gemini-3.5-flash-high"
+
+    if "gemini-3.6-flash" in base_model:
+        if "-extra-low" in model_lower or "-minimal" in model_lower:
+            return "gemini-3.6-flash-extra-low"
+        elif "-low" in model_lower:
+            return "gemini-3.6-flash-low"
+        elif "-high" in model_lower:
+            return "gemini-3.6-flash-high"
             
     if "gemini-3-flash" in base_model:
         return "gemini-3-flash-agent"
@@ -703,6 +712,14 @@ def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str],
             return "gemini-3.5-flash-high"
         else:
             return "gemini-3.5-flash-low"
+
+    if "gemini-3.6-flash" in base_model:
+        if thinking_level and thinking_level.upper() in ("MINIMAL", "EXTRA-LOW"):
+            return "gemini-3.6-flash-extra-low"
+        elif thinking_level and thinking_level.upper() == "HIGH":
+            return "gemini-3.6-flash-high"
+        else:
+            return "gemini-3.6-flash-low"
 
     return base_model
 
@@ -839,7 +856,7 @@ async def normalize_gemini_request(
                 
                 # 既然 Antigravity 后端是通过模型名（如 -high/-low）来确定思考深度的，
                 # 对于 Gemini 3/3.5 模型必须移除 thinkingLevel 配置以防止 API 返回参数冲突错误。
-                if "gemini-3" in model or "gemini-3.5" in model:
+                if "gemini-3" in model or "gemini-3.5" in model or "gemini-3.6" in model:
                     generation_config.pop("thinkingConfig", None)
                 else:
                     # 对于 Gemini 2.5 系列，保留 thinkingConfig

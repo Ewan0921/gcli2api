@@ -86,6 +86,50 @@ def get_base_model_from_feature_model(model_name: str) -> str:
     return model_name
 
 
+async def apply_custom_model_mapping(model_name: str) -> str:
+    """
+    应用自定义模型别名映射。
+    若存在配置文件/环境变量且命中别名，则替换为映射目标；
+    若包含功能前缀（如 '假流式/'），替换后保留前缀；
+    若未命中或无配置，原样返回。
+    """
+    if not model_name:
+        return model_name
+
+    from config import get_custom_model_mappings
+    mappings = await get_custom_model_mappings()
+    if not mappings:
+        return model_name
+
+    # 提取功能前缀
+    prefix = ""
+    clean_model = model_name
+    for p in ["假流式/", "流式抗截断/"]:
+        if model_name.startswith(p):
+            prefix = p
+            clean_model = model_name[len(p) :]
+            break
+
+    # 匹配 (支持精确匹配和大小写不敏感匹配)
+    target_model = None
+    if clean_model in mappings:
+        target_model = mappings[clean_model]
+    else:
+        # 大小写不敏感查找
+        clean_model_lower = clean_model.lower()
+        for k, v in mappings.items():
+            if k.lower() == clean_model_lower:
+                target_model = v
+                break
+
+    if target_model:
+        log.info(f"[MODEL_MAPPING] Mapped custom alias: {model_name} -> {prefix}{target_model}")
+        return f"{prefix}{target_model}"
+
+    return model_name
+
+
+
 def get_available_models(router_type: str = "openai") -> List[str]:
     """
     Get available models with feature prefixes.

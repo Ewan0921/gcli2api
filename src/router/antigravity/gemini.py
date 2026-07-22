@@ -28,7 +28,8 @@ from src.utils import (
     get_base_model_from_feature_model,
     is_anti_truncation_model,
     authenticate_gemini_flexible,
-    is_fake_streaming_model
+    is_fake_streaming_model,
+    apply_custom_model_mapping,
 )
 
 # 本地模块 - 转换器（假流式需要）
@@ -84,6 +85,9 @@ async def generate_content(
     if is_health_check_request(normalized_dict, format="gemini"):
         response = create_health_check_response(format="gemini")
         return JSONResponse(content=response)
+
+    # 应用自定义模型别名映射
+    model = await apply_custom_model_mapping(model)
 
     # 处理模型名称和功能检测
     use_anti_truncation = is_anti_truncation_model(model)

@@ -29,6 +29,7 @@ from src.utils import (
     is_anti_truncation_model,
     is_fake_streaming_model,
     authenticate_bearer,
+    apply_custom_model_mapping,
 )
 
 # 本地模块 - 转换器（假流式需要）
@@ -85,10 +86,13 @@ async def messages(
         response = create_health_check_response(format="anthropic")
         return JSONResponse(content=response)
 
+    # 应用自定义模型别名映射
+    model_name = await apply_custom_model_mapping(claude_request.model)
+
     # 处理模型名称和功能检测
-    use_fake_streaming = is_fake_streaming_model(claude_request.model)
-    use_anti_truncation = is_anti_truncation_model(claude_request.model)
-    real_model = get_base_model_from_feature_model(claude_request.model)
+    use_fake_streaming = is_fake_streaming_model(model_name)
+    use_anti_truncation = is_anti_truncation_model(model_name)
+    real_model = get_base_model_from_feature_model(model_name)
 
     # 获取流式标志
     is_streaming = claude_request.stream

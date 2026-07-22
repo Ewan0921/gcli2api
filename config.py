@@ -494,3 +494,41 @@ async def get_keepalive_interval() -> int:
             pass
 
     return int(await get_config_value("keepalive_interval", 60))
+
+
+async def get_custom_model_mappings() -> dict[str, str]:
+    """
+    获取自定义模型别名映射字典。
+
+    优先顺序:
+    1. 环境变量 MODEL_MAP (JSON 格式字符串，如 '{"Mimo-v2.5-Pro":"gemini-3.1-pro"}')
+    2. 项目根目录下的 model_mappings.json 文件
+    3. 默认: 空字典 {}
+    """
+    import json
+    from pathlib import Path
+
+    # 1. 尝试从环境变量 MODEL_MAP 读取
+    env_map_str = os.getenv("MODEL_MAP")
+    if env_map_str:
+        try:
+            parsed = json.loads(env_map_str)
+            if isinstance(parsed, dict):
+                return {str(k): str(v) for k, v in parsed.items()}
+        except Exception:
+            pass
+
+    # 2. 尝试从根目录下的 model_mappings.json 文件读取
+    project_root = Path(__file__).resolve().parent
+    mapping_file = project_root / "model_mappings.json"
+    if mapping_file.is_file():
+        try:
+            with open(mapping_file, "r", encoding="utf-8") as f:
+                parsed = json.load(f)
+                if isinstance(parsed, dict):
+                    return {str(k): str(v) for k, v in parsed.items()}
+        except Exception:
+            pass
+
+    return {}
+

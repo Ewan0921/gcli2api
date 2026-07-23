@@ -850,8 +850,6 @@ Welcome to join the QQ group for discussion!
 
 **QQ Group: 1083250744**
 
-<img src="qq群.jpg" width="200" alt="QQ Group QR Code">
-
 ---
 
 ## License and Disclaimer

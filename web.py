@@ -153,10 +153,14 @@ app.include_router(vertex_openai_router, prefix="", tags=["Vertex OpenAI API"])
 # Vertex AI 路由 - 模型列表
 app.include_router(vertex_model_list_router, prefix="", tags=["Vertex Model List"])
 
-# 静态文件路由 - 服务docs目录下的文件
+# 静态文件路由 - 服务docs目录下的文件（如果不存在则自动创建，避免报错崩溃）
+if not os.path.exists("docs"):
+    os.makedirs("docs", exist_ok=True)
 app.mount("/docs", StaticFiles(directory="docs"), name="docs")
 
-# 静态文件路由 - 服务front目录下的文件（HTML、JS、CSS等）
+# 静态文件路由 - 服务front目录下的文件（如果不存在则自动创建，避免报错崩溃）
+if not os.path.exists("front"):
+    os.makedirs("front", exist_ok=True)
 app.mount("/front", StaticFiles(directory="front"), name="front")
 
 

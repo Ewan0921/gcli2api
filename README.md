@@ -850,8 +850,6 @@ export COMPATIBILITY_MODE=true
 
 **QQ 群号：1083250744**
 
-<img src="docs/qq群.jpg" width="200" alt="QQ群二维码">
-
 ---
 
 ## 许可证与免责声明

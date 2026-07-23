@@ -295,7 +295,8 @@ async def chat_completions(
                     openai_chunk_str = convert_gemini_to_openai_stream(
                         chunk_str,
                         real_model,
-                        response_id
+                        response_id,
+                        mode="antigravity"
                     )
 
                     if openai_chunk_str:
@@ -368,7 +369,8 @@ async def chat_completions(
                         openai_chunk_str = convert_gemini_to_openai_stream(
                             chunk_str,
                             real_model,
-                            response_id
+                            response_id,
+                            mode="antigravity"
                         )
 
                         if openai_chunk_str:

@@ -1654,7 +1654,8 @@ def convert_gemini_to_openai_stream(
     gemini_stream_chunk: str,
     model: str,
     response_id: str,
-    status_code: int = 200
+    status_code: int = 200,
+    mode: str = "openai"
 ) -> Optional[str]:
     """
     将 Gemini 格式流式响应块转换为 OpenAI SSE 格式流式响应

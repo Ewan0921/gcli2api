@@ -24,7 +24,7 @@ from log import log
 from src.credential_manager import credential_manager
 from src.httpx_client import stream_post_async, post_async
 from src.models import Model, model_to_dict
-from src.utils import ANTIGRAVITY_USER_AGENT
+from src.utils import ANTIGRAVITY_USER_AGENT, record_request_log_async
 
 # 导入共同的基础功能
 from src.api.utils import (
@@ -468,6 +468,31 @@ async def stream_request(
                         success_recorded = True
                         log.debug(f"[ANTIGRAVITY STREAM] 开始接收流式响应，模型: {model_name}")
 
+                    try:
+                        chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
+                        if "usageMetadata" in chunk_str:
+                            user_email = credential_data.get("user_email") or credential_data.get("email") or ""
+                            for line in chunk_str.split("\n"):
+                                line_clean = line.strip()
+                                if not line_clean:
+                                    continue
+                                json_str = line_clean[6:].strip() if line_clean.startswith("data: ") else line_clean
+                                if json_str and json_str != "[DONE]":
+                                    try:
+                                        line_data = json.loads(json_str)
+                                        if isinstance(line_data, dict):
+                                            usage = line_data.get("usageMetadata") or (
+                                                line_data.get("response", {}).get("usageMetadata")
+                                                if isinstance(line_data.get("response"), dict)
+                                                else None
+                                            )
+                                            if usage:
+                                                record_request_log_async(user_email, "antigravity", model_name, usage)
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+
                     # 记录原始chunk内容（用于调试）
                     if isinstance(chunk, bytes):
                         log.debug(f"[ANTIGRAVITY STREAM RAW] chunk(bytes): {chunk}")
@@ -702,6 +727,20 @@ async def non_stream_request(
                     await record_api_call_success(
                         credential_manager, current_file, mode="antigravity", model_name=model_name
                     )
+                    try:
+                        user_email = credential_data.get("user_email") or credential_data.get("email") or ""
+                        resp_json = json.loads(response.content)
+                        if isinstance(resp_json, dict):
+                            usage = resp_json.get("usageMetadata") or (
+                                resp_json.get("response", {}).get("usageMetadata")
+                                if isinstance(resp_json.get("response"), dict)
+                                else None
+                            )
+                            if usage:
+                                record_request_log_async(user_email, "antigravity", model_name, usage)
+                    except Exception:
+                        pass
+
                     return Response(
                         content=response.content,
                         status_code=200,

@@ -27,7 +27,14 @@ async def serve_control_panel(request: Request):
 
         with open(html_file_path, "r", encoding="utf-8") as f:
             html_content = f.read()
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(
+            content=html_content,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
 
     except Exception as e:
         log.error(f"加载控制面板页面失败: {e}")

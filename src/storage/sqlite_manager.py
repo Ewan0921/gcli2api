@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiosqlite
@@ -248,6 +249,31 @@ class SQLiteManager:
                 value TEXT NOT NULL,
                 updated_at REAL DEFAULT (unixepoch())
             )
+        """)
+
+        # 请求日志表
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS request_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL,
+                date_str TEXT NOT NULL,
+                email TEXT,
+                mode TEXT,
+                model TEXT,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cached_tokens INTEGER DEFAULT 0,
+                uncached_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_req_logs_date
+            ON request_logs(date_str)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_req_logs_created_at
+            ON request_logs(created_at)
         """)
 
         log.debug("SQLite tables and indexes created")
@@ -1369,3 +1395,173 @@ class SQLiteManager:
 
         except Exception as e:
             log.error(f"Error recording success for {filename}: {e}")
+
+    # ============ 请求日志管理 ============
+
+    async def add_request_log(
+        self,
+        email: Optional[str],
+        mode: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int,
+        uncached_tokens: int,
+        total_tokens: int,
+    ) -> bool:
+        """记录请求日志，同时删除6个月（180天）以前的数据"""
+        self._ensure_initialized()
+        now = time.time()
+        date_str = datetime.fromtimestamp(now, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
+        cutoff_time = now - (180 * 86400)
+
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                await db.execute(
+                    """
+                    INSERT INTO request_logs (
+                        created_at, date_str, email, mode, model,
+                        input_tokens, output_tokens, cached_tokens, uncached_tokens, total_tokens
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        now,
+                        date_str,
+                        email or "",
+                        mode,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cached_tokens,
+                        uncached_tokens,
+                        total_tokens,
+                    ),
+                )
+                await db.execute("DELETE FROM request_logs WHERE created_at < ?", (cutoff_time,))
+                await db.commit()
+                return True
+        except Exception as e:
+            log.error(f"Error adding request log to SQLite: {e}")
+            return False
+
+    async def get_request_logs(
+        self,
+        date_str: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """获取指定日期的请求日志及统计信息"""
+        self._ensure_initialized()
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                async with db.execute(
+                    """
+                    SELECT 
+                        COUNT(*),
+                        COALESCE(SUM(input_tokens), 0),
+                        COALESCE(SUM(output_tokens), 0),
+                        COALESCE(SUM(cached_tokens), 0),
+                        COALESCE(SUM(uncached_tokens), 0),
+                        COALESCE(SUM(total_tokens), 0)
+                    FROM request_logs
+                    WHERE date_str = ?
+                    """,
+                    (date_str,),
+                ) as cursor:
+                    summary_row = await cursor.fetchone()
+
+                total_count = summary_row[0] if summary_row else 0
+                input_tokens = summary_row[1] if summary_row else 0
+                output_tokens = summary_row[2] if summary_row else 0
+                cached_tokens = summary_row[3] if summary_row else 0
+                uncached_tokens = summary_row[4] if summary_row else 0
+                total_tokens = summary_row[5] if summary_row else 0
+
+                cache_hit_rate = round(cached_tokens / input_tokens * 100, 2) if input_tokens > 0 else 0.0
+
+                summary = {
+                    "total_requests": total_count,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cached_tokens": cached_tokens,
+                    "uncached_tokens": uncached_tokens,
+                    "total_tokens": total_tokens,
+                    "cache_hit_rate": cache_hit_rate,
+                }
+
+                offset = (page - 1) * page_size
+                total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
+
+                logs = []
+                async with db.execute(
+                    """
+                    SELECT id, created_at, email, mode, model,
+                           input_tokens, output_tokens, cached_tokens, uncached_tokens, total_tokens
+                    FROM request_logs
+                    WHERE date_str = ?
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (date_str, page_size, offset),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    for row in rows:
+                        created_at_dt = datetime.fromtimestamp(row[1], tz=timezone.utc).astimezone()
+                        logs.append(
+                            {
+                                "id": row[0],
+                                "created_at": row[1],
+                                "created_at_str": created_at_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                "email": row[2] or "",
+                                "mode": row[3],
+                                "model": row[4],
+                                "input_tokens": row[5],
+                                "output_tokens": row[6],
+                                "cached_tokens": row[7],
+                                "uncached_tokens": row[8],
+                                "total_tokens": row[9],
+                            }
+                        )
+
+                return {
+                    "date": date_str,
+                    "summary": summary,
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_pages": total_pages,
+                        "total_count": total_count,
+                    },
+                    "logs": logs,
+                }
+        except Exception as e:
+            log.error(f"Error fetching request logs from SQLite: {e}")
+            return {
+                "date": date_str,
+                "summary": {
+                    "total_requests": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cached_tokens": 0,
+                    "uncached_tokens": 0,
+                    "total_tokens": 0,
+                    "cache_hit_rate": 0.0,
+                },
+                "pagination": {"page": page, "page_size": page_size, "total_pages": 0, "total_count": 0},
+                "logs": [],
+            }
+
+    async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
+        """清空指定日期或全部请求日志"""
+        self._ensure_initialized()
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                if date_str and date_str != "all":
+                    await db.execute("DELETE FROM request_logs WHERE date_str = ?", (date_str,))
+                else:
+                    await db.execute("DELETE FROM request_logs")
+                await db.commit()
+                return True
+        except Exception as e:
+            log.error(f"Error clearing request logs in SQLite: {e}")
+            return False

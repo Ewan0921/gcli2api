@@ -20,7 +20,7 @@ from src.converter.utils import merge_system_messages
 
 from log import log
 
-def _convert_usage_metadata(usage_metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _convert_usage_metadata(usage_metadata: Dict[str, Any], email: Optional[str] = None, mode: str = "openai", model: str = "") -> Optional[Dict[str, Any]]:
     """
     将Gemini的usageMetadata转换为OpenAI格式的usage字段
 
@@ -32,6 +32,12 @@ def _convert_usage_metadata(usage_metadata: Dict[str, Any]) -> Optional[Dict[str
     """
     if not usage_metadata:
         return None
+
+    try:
+        from src.utils import record_request_log_async
+        record_request_log_async(email=email, mode=mode, model=model, usage_metadata=usage_metadata)
+    except Exception:
+        pass
 
     prompt_tokens_total = int(usage_metadata.get("promptTokenCount", 0) or 0)
     cached_tokens = int(usage_metadata.get("cachedContentTokenCount", 0) or 0)
@@ -1797,9 +1803,6 @@ def convert_gemini_to_openai_stream(
             "finish_reason": finish_reason,
         })
 
-    # 转换 usageMetadata (只在流结束时存在)
-    usage = _convert_usage_metadata(gemini_response.get("usageMetadata"))
-
     # 构建 OpenAI 流式响应
     response_data = {
         "id": response_id,
@@ -1809,10 +1812,11 @@ def convert_gemini_to_openai_stream(
         "choices": choices,
     }
 
-    # 只在有 usage 数据且有 finish_reason 时添加 usage
-    if usage:
-        has_finish_reason = any(choice.get("finish_reason") for choice in choices)
-        if has_finish_reason:
+    # 只在有 usage 数据且有 finish_reason 时转换与记录日志
+    has_finish_reason = any(choice.get("finish_reason") for choice in choices)
+    if has_finish_reason:
+        usage = _convert_usage_metadata(gemini_response.get("usageMetadata"), mode=mode, model=model)
+        if usage:
             response_data["usage"] = usage
 
     # 转换为 SSE 格式: "data: {json}\n\n"

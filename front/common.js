@@ -1038,6 +1038,7 @@ function triggerTabDataLoad(tabName) {
     if (tabName === 'antigravity-manage') AppState.antigravityCreds.refresh();
     if (tabName === 'config') loadConfig();
     if (tabName === 'logs') connectWebSocket();
+    if (tabName === 'token-stats') loadTokenStats();
 }
 
 
@@ -3222,4 +3223,146 @@ document.addEventListener('DOMContentLoaded', function () {
 function autoSetKeepaliveUrl() {
     const url = `${window.location.protocol}//${window.location.host}`;
     document.getElementById('keepaliveUrl').value = url;
+}
+
+// =====================================================================
+// Token 统计相关前端函数
+// =====================================================================
+let currentTokenStatsPage = 1;
+
+async function loadTokenStats(page = 1) {
+    currentTokenStatsPage = page;
+    const dateInput = document.getElementById('tokenStatsDate');
+    if (!dateInput) return;
+
+    let selectedDate = dateInput.value;
+    if (!selectedDate) {
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        selectedDate = `${yyyy}-${mm}-${dd}`;
+        dateInput.value = selectedDate;
+    }
+
+    try {
+        const response = await fetch(`/panel/api/stats/token_logs?date=${selectedDate}&page=${page}&page_size=50`, {
+            headers: getAuthHeaders()
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        renderTokenStats(data);
+    } catch (error) {
+        console.error('获取 Token 统计数据失败:', error);
+        safeShowNotify('获取 Token 统计数据失败: ' + error.message, 'error');
+    }
+}
+
+function renderTokenStats(data) {
+    const summary = data.summary || {};
+    const setElemText = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = val;
+    };
+
+    setElemText('statTotalRequests', Number(summary.total_requests || 0).toLocaleString());
+    setElemText('statInputTokens', Number(summary.input_tokens || 0).toLocaleString());
+    setElemText('statOutputTokens', Number(summary.output_tokens || 0).toLocaleString());
+    setElemText('statCachedTokens', Number(summary.cached_tokens || 0).toLocaleString());
+    setElemText('statUncachedTokens', Number(summary.uncached_tokens || 0).toLocaleString());
+    setElemText('statCacheHitRate', (summary.cache_hit_rate || 0).toFixed(2) + '%');
+
+    const tbody = document.getElementById('tokenStatsTbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    const logs = data.logs || [];
+
+    if (logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: #999; padding: 20px;">暂无该日期的请求记录</td></tr>`;
+    } else {
+        logs.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="font-size: 12px; color: #555;">${item.created_at_str || ''}</td>
+                <td><span style="font-weight: 500; color: #333;">${escapeHtml(item.email || '未记录')}</span></td>
+                <td><span style="padding: 2px 6px; border-radius: 4px; font-size: 11px; color: white; background-color: ${item.mode === 'antigravity' ? '#17a2b8' : '#007bff'};">${escapeHtml(item.mode || '')}</span></td>
+                <td><span style="font-family: monospace; font-size: 12px; color: #444;">${escapeHtml(item.model || '')}</span></td>
+                <td style="font-weight: bold; color: #212529;">${Number(item.input_tokens || 0).toLocaleString()}</td>
+                <td style="font-weight: bold; color: #28a745;">${Number(item.output_tokens || 0).toLocaleString()}</td>
+                <td style="color: #17a2b8;">${Number(item.cached_tokens || 0).toLocaleString()}</td>
+                <td style="color: #fd7e14;">${Number(item.uncached_tokens || 0).toLocaleString()}</td>
+                <td style="font-weight: bold; color: #007bff;">${Number(item.total_tokens || 0).toLocaleString()}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    const pagination = data.pagination || {};
+    const page = pagination.page || 1;
+    const totalPages = pagination.total_pages || 1;
+    const paginationEl = document.getElementById('tokenStatsPagination');
+    if (paginationEl) {
+        paginationEl.innerHTML = `
+            <button class="btn" style="width: auto; padding: 6px 16px; margin: 0 5px; font-size: 13px;" onclick="loadTokenStats(${page - 1})" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+            <span style="margin: 0 10px; font-size: 13px; color: #aaa;">第 ${page} / ${totalPages} 页 (共 ${pagination.total_count || 0} 条)</span>
+            <button class="btn" style="width: auto; padding: 6px 16px; margin: 0 5px; font-size: 13px;" onclick="loadTokenStats(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
+        `;
+    }
+}
+
+function safeShowNotify(msg, type = 'info') {
+    if (typeof showToast === 'function') {
+        showToast(msg, type);
+    } else if (typeof showStatus === 'function') {
+        showStatus(msg, type);
+    } else {
+        alert(msg);
+    }
+}
+
+async function clearTokenLogs(target = 'day') {
+    const dateInput = document.getElementById('tokenStatsDate');
+    const selectedDate = dateInput ? dateInput.value : '';
+
+    let confirmMsg = '';
+    let queryDate = '';
+
+    if (target === 'day') {
+        if (!selectedDate) {
+            safeShowNotify('请先选择需要清空的日期', 'error');
+            return;
+        }
+        confirmMsg = `确定要清空 ${selectedDate} 当天的所有请求 Token 日志脏数据吗？`;
+        queryDate = selectedDate;
+    } else {
+        confirmMsg = '⚠️ 警告：确定要彻底清空历史上的【全部】请求 Token 日志数据吗？此操作不可恢复！';
+        queryDate = 'all';
+    }
+
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/panel/api/stats/token_logs?date=${queryDate}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            safeShowNotify(data.message || '数据清除成功', 'success');
+            loadTokenStats(1);
+        } else {
+            safeShowNotify('数据清除失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('清除 Token 统计数据失败:', error);
+        safeShowNotify('清除 Token 统计数据失败: ' + error.message, 'error');
+    }
 }

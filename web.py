@@ -162,6 +162,7 @@ app.mount("/docs", StaticFiles(directory="docs"), name="docs")
 if not os.path.exists("front"):
     os.makedirs("front", exist_ok=True)
 app.mount("/front", StaticFiles(directory="front"), name="front")
+app.mount("/panel/front", StaticFiles(directory="front"), name="panel_front")
 
 
 # 保活接口（仅响应 HEAD）

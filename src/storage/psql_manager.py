@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import asyncpg
@@ -129,6 +130,22 @@ class PSQLManager:
             )
         """)
 
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS request_logs (
+                id SERIAL PRIMARY KEY,
+                created_at DOUBLE PRECISION NOT NULL,
+                date_str TEXT NOT NULL,
+                email TEXT,
+                mode TEXT,
+                model TEXT,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cached_tokens INTEGER DEFAULT 0,
+                uncached_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0
+            )
+        """)
+
         # 索引
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_disabled ON credentials(disabled)
@@ -141,6 +158,12 @@ class PSQLManager:
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_ag_rotation_order ON antigravity_credentials(rotation_order)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_req_logs_date ON request_logs(date_str)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_req_logs_created_at ON request_logs(created_at)
         """)
 
         log.debug("PostgreSQL tables and indexes created")
@@ -1028,3 +1051,170 @@ class PSQLManager:
 
         except Exception as e:
             log.error(f"Error recording success for {filename}: {e}")
+
+    # ============ 请求日志管理 ============
+
+    async def add_request_log(
+        self,
+        email: Optional[str],
+        mode: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int,
+        uncached_tokens: int,
+        total_tokens: int,
+    ) -> bool:
+        """记录请求日志，同时删除6个月（180天）以前的数据"""
+        self._ensure_initialized()
+        now = time.time()
+        date_str = datetime.fromtimestamp(now, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
+        cutoff_time = now - (180 * 86400)
+
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO request_logs (
+                        created_at, date_str, email, mode, model,
+                        input_tokens, output_tokens, cached_tokens, uncached_tokens, total_tokens
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    """,
+                    now,
+                    date_str,
+                    email or "",
+                    mode,
+                    model,
+                    input_tokens,
+                    output_tokens,
+                    cached_tokens,
+                    uncached_tokens,
+                    total_tokens,
+                )
+                await conn.execute("DELETE FROM request_logs WHERE created_at < $1", cutoff_time)
+                return True
+        except Exception as e:
+            log.error(f"Error adding request log to PostgreSQL: {e}")
+            return False
+
+    async def get_request_logs(
+        self,
+        date_str: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """获取指定日期的请求日志及统计信息"""
+        self._ensure_initialized()
+        try:
+            async with self._pool.acquire() as conn:
+                summary_row = await conn.fetchrow(
+                    """
+                    SELECT 
+                        COUNT(*)::INT AS total_count,
+                        COALESCE(SUM(input_tokens), 0)::INT AS input_tokens,
+                        COALESCE(SUM(output_tokens), 0)::INT AS output_tokens,
+                        COALESCE(SUM(cached_tokens), 0)::INT AS cached_tokens,
+                        COALESCE(SUM(uncached_tokens), 0)::INT AS uncached_tokens,
+                        COALESCE(SUM(total_tokens), 0)::INT AS total_tokens
+                    FROM request_logs
+                    WHERE date_str = $1
+                    """,
+                    date_str,
+                )
+
+                total_count = summary_row["total_count"] if summary_row else 0
+                input_tokens = summary_row["input_tokens"] if summary_row else 0
+                output_tokens = summary_row["output_tokens"] if summary_row else 0
+                cached_tokens = summary_row["cached_tokens"] if summary_row else 0
+                uncached_tokens = summary_row["uncached_tokens"] if summary_row else 0
+                total_tokens = summary_row["total_tokens"] if summary_row else 0
+
+                cache_hit_rate = round(cached_tokens / input_tokens * 100, 2) if input_tokens > 0 else 0.0
+
+                summary = {
+                    "total_requests": total_count,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cached_tokens": cached_tokens,
+                    "uncached_tokens": uncached_tokens,
+                    "total_tokens": total_tokens,
+                    "cache_hit_rate": cache_hit_rate,
+                }
+
+                offset = (page - 1) * page_size
+                total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
+
+                rows = await conn.fetch(
+                    """
+                    SELECT id, created_at, email, mode, model,
+                           input_tokens, output_tokens, cached_tokens, uncached_tokens, total_tokens
+                    FROM request_logs
+                    WHERE date_str = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    date_str,
+                    page_size,
+                    offset,
+                )
+
+                logs = []
+                for row in rows:
+                    created_at_dt = datetime.fromtimestamp(row["created_at"], tz=timezone.utc).astimezone()
+                    logs.append(
+                        {
+                            "id": row["id"],
+                            "created_at": row["created_at"],
+                            "created_at_str": created_at_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "email": row["email"] or "",
+                            "mode": row["mode"],
+                            "model": row["model"],
+                            "input_tokens": row["input_tokens"],
+                            "output_tokens": row["output_tokens"],
+                            "cached_tokens": row["cached_tokens"],
+                            "uncached_tokens": row["uncached_tokens"],
+                            "total_tokens": row["total_tokens"],
+                        }
+                    )
+
+                return {
+                    "date": date_str,
+                    "summary": summary,
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total_pages": total_pages,
+                        "total_count": total_count,
+                    },
+                    "logs": logs,
+                }
+        except Exception as e:
+            log.error(f"Error fetching request logs from PostgreSQL: {e}")
+            return {
+                "date": date_str,
+                "summary": {
+                    "total_requests": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cached_tokens": 0,
+                    "uncached_tokens": 0,
+                    "total_tokens": 0,
+                    "cache_hit_rate": 0.0,
+                },
+                "pagination": {"page": page, "page_size": page_size, "total_pages": 0, "total_count": 0},
+                "logs": [],
+            }
+
+    async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
+        """清空指定日期或全部请求日志"""
+        self._ensure_initialized()
+        try:
+            async with self._pool.acquire() as conn:
+                if date_str and date_str != "all":
+                    await conn.execute("DELETE FROM request_logs WHERE date_str = $1", date_str)
+                else:
+                    await conn.execute("DELETE FROM request_logs")
+                return True
+        except Exception as e:
+            log.error(f"Error clearing request logs in PostgreSQL: {e}")
+            return False

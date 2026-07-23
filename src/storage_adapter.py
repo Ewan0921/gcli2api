@@ -71,6 +71,34 @@ class StorageBackend(Protocol):
         """删除配置项"""
         ...
 
+    # 请求日志管理
+    async def add_request_log(
+        self,
+        email: Optional[str],
+        mode: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int,
+        uncached_tokens: int,
+        total_tokens: int,
+    ) -> bool:
+        """记录请求日志"""
+        ...
+
+    async def get_request_logs(
+        self,
+        date_str: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """获取指定日期的请求日志及统计信息"""
+        ...
+
+    async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
+        """删除指定日期或全部请求日志"""
+        ...
+
 
 class StorageAdapter:
     """存储适配器，根据配置选择存储后端"""
@@ -79,6 +107,11 @@ class StorageAdapter:
         self._backend: Optional["StorageBackend"] = None
         self._initialized = False
         self._lock = asyncio.Lock()
+
+    def _ensure_initialized(self):
+        """确保适配器已初始化"""
+        if not self._initialized or self._backend is None:
+            raise RuntimeError("StorageAdapter is not initialized. Call initialize() first.")
 
     async def initialize(self) -> None:
         """初始化存储适配器"""
@@ -99,30 +132,26 @@ class StorageAdapter:
                     await self._backend.initialize()
                     log.info("Using PostgreSQL storage backend")
                 except Exception as e:
-                    log.error(f"Failed to initialize PostgreSQL backend: {e}")
-                    # 尝试降级到 SQLite
-                    log.info("Falling back to SQLite storage backend")
-                    try:
+                    log.error(f"Failed to initialize PostgreSQL backend, fallback to SQLite: {e}")
+                    if mongodb_uri:
+                        try:
+                            from .storage.mongodb_manager import MongoDBManager
+
+                            self._backend = MongoDBManager()
+                            await self._backend.initialize()
+                            log.info("Using MongoDB storage backend (fallback)")
+                        except Exception as e2:
+                            log.error(f"Failed to initialize MongoDB backend, fallback to SQLite: {e2}")
+                            from .storage.sqlite_manager import SQLiteManager
+
+                            self._backend = SQLiteManager()
+                            await self._backend.initialize()
+                    else:
                         from .storage.sqlite_manager import SQLiteManager
 
                         self._backend = SQLiteManager()
                         await self._backend.initialize()
-                        log.info("Using SQLite storage backend (fallback)")
-                    except Exception as e2:
-                        log.error(f"Failed to initialize SQLite backend: {e2}")
-                        raise RuntimeError("No storage backend available") from e2
-            elif not mongodb_uri:
-                # 优先使用 SQLite（默认启用，无需环境变量）
-                try:
-                    from .storage.sqlite_manager import SQLiteManager
-
-                    self._backend = SQLiteManager()
-                    await self._backend.initialize()
-                    log.info("Using SQLite storage backend")
-                except Exception as e:
-                    log.error(f"Failed to initialize SQLite backend: {e}")
-                    raise RuntimeError("No storage backend available") from e
-            else:
+            elif mongodb_uri:
                 # 使用 MongoDB
                 try:
                     from .storage.mongodb_manager import MongoDBManager
@@ -131,18 +160,18 @@ class StorageAdapter:
                     await self._backend.initialize()
                     log.info("Using MongoDB storage backend")
                 except Exception as e:
-                    log.error(f"Failed to initialize MongoDB backend: {e}")
-                    # 尝试降级到 SQLite
-                    log.info("Falling back to SQLite storage backend")
-                    try:
-                        from .storage.sqlite_manager import SQLiteManager
+                    log.error(f"Failed to initialize MongoDB backend, fallback to SQLite: {e}")
+                    from .storage.sqlite_manager import SQLiteManager
 
-                        self._backend = SQLiteManager()
-                        await self._backend.initialize()
-                        log.info("Using SQLite storage backend (fallback)")
-                    except Exception as e2:
-                        log.error(f"Failed to initialize SQLite backend: {e2}")
-                        raise RuntimeError("No storage backend available") from e2
+                    self._backend = SQLiteManager()
+                    await self._backend.initialize()
+            else:
+                # 默认使用 SQLite
+                from .storage.sqlite_manager import SQLiteManager
+
+                self._backend = SQLiteManager()
+                await self._backend.initialize()
+                log.info("Using SQLite storage backend")
 
             self._initialized = True
 
@@ -152,11 +181,6 @@ class StorageAdapter:
             await self._backend.close()
             self._backend = None
             self._initialized = False
-
-    def _ensure_initialized(self):
-        """确保存储适配器已初始化"""
-        if not self._initialized or not self._backend:
-            raise RuntimeError("Storage adapter not initialized")
 
     # ============ 凭证管理 ============
 
@@ -218,6 +242,46 @@ class StorageAdapter:
         """删除配置项"""
         self._ensure_initialized()
         return await self._backend.delete_config(key)
+
+    # ============ 请求日志管理 ============
+
+    async def add_request_log(
+        self,
+        email: Optional[str],
+        mode: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int,
+        uncached_tokens: int,
+        total_tokens: int,
+    ) -> bool:
+        """记录请求日志（含自动清理6个月前的记录）"""
+        self._ensure_initialized()
+        return await self._backend.add_request_log(
+            email=email,
+            mode=mode,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            uncached_tokens=uncached_tokens,
+            total_tokens=total_tokens,
+        )
+
+    async def get_request_logs(
+        self,
+        date_str: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """获取指定日期的请求日志及统计信息"""
+        self._ensure_initialized()
+        return await self._backend.get_request_logs(
+            date_str=date_str,
+            page=page,
+            page_size=page_size,
+        )
 
     # ============ 工具方法 ============
 
@@ -317,6 +381,11 @@ class StorageAdapter:
                 )
 
         return info
+
+    async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
+        """清空指定日期或全部请求日志"""
+        self._ensure_initialized()
+        return await self._backend.clear_request_logs(date_str)
 
 
 # 全局存储适配器实例

@@ -6,6 +6,7 @@ import json
 import os
 import random
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
@@ -1533,3 +1534,161 @@ class MongoDBManager:
 
         except Exception as e:
             log.error(f"Error recording success for {filename}: {e}")
+
+    # ============ 请求日志管理 ============
+
+    async def add_request_log(
+        self,
+        email: Optional[str],
+        mode: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int,
+        uncached_tokens: int,
+        total_tokens: int,
+    ) -> bool:
+        """记录请求日志，同时删除6个月（180天）以前的数据"""
+        self._ensure_initialized()
+        now = time.time()
+        date_str = datetime.fromtimestamp(now, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
+        cutoff_time = now - (180 * 86400)
+
+        try:
+            collection = self._db["request_logs"]
+            doc = {
+                "created_at": now,
+                "date_str": date_str,
+                "email": email or "",
+                "mode": mode,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cached_tokens": cached_tokens,
+                "uncached_tokens": uncached_tokens,
+                "total_tokens": total_tokens,
+            }
+            await collection.insert_one(doc)
+            # 清理 6 个月以前的数据
+            await collection.delete_many({"created_at": {"$lt": cutoff_time}})
+            return True
+        except Exception as e:
+            log.error(f"Error adding request log to MongoDB: {e}")
+            return False
+
+    async def get_request_logs(
+        self,
+        date_str: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """获取指定日期的请求日志及统计信息"""
+        self._ensure_initialized()
+        try:
+            collection = self._db["request_logs"]
+            pipeline = [
+                {"$match": {"date_str": date_str}},
+                {
+                    "$group": {
+                        "_id": None,
+                        "total_requests": {"$sum": 1},
+                        "input_tokens": {"$sum": "$input_tokens"},
+                        "output_tokens": {"$sum": "$output_tokens"},
+                        "cached_tokens": {"$sum": "$cached_tokens"},
+                        "uncached_tokens": {"$sum": "$uncached_tokens"},
+                        "total_tokens": {"$sum": "$total_tokens"},
+                    }
+                },
+            ]
+            agg_result = await collection.aggregate(pipeline).to_list(length=1)
+
+            if agg_result:
+                res = agg_result[0]
+                total_count = res.get("total_requests", 0)
+                input_tokens = res.get("input_tokens", 0)
+                output_tokens = res.get("output_tokens", 0)
+                cached_tokens = res.get("cached_tokens", 0)
+                uncached_tokens = res.get("uncached_tokens", 0)
+                total_tokens = res.get("total_tokens", 0)
+            else:
+                total_count = input_tokens = output_tokens = cached_tokens = uncached_tokens = total_tokens = 0
+
+            cache_hit_rate = round(cached_tokens / input_tokens * 100, 2) if input_tokens > 0 else 0.0
+
+            summary = {
+                "total_requests": total_count,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cached_tokens": cached_tokens,
+                "uncached_tokens": uncached_tokens,
+                "total_tokens": total_tokens,
+                "cache_hit_rate": cache_hit_rate,
+            }
+
+            skip = (page - 1) * page_size
+            total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
+
+            cursor = collection.find({"date_str": date_str}).sort("created_at", -1).skip(skip).limit(page_size)
+            docs = await cursor.to_list(length=page_size)
+
+            logs = []
+            for doc in docs:
+                created_at_val = doc.get("created_at", 0)
+                created_at_dt = datetime.fromtimestamp(created_at_val, tz=timezone.utc).astimezone()
+                logs.append(
+                    {
+                        "id": str(doc.get("_id", "")),
+                        "created_at": created_at_val,
+                        "created_at_str": created_at_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        "email": doc.get("email", ""),
+                        "mode": doc.get("mode", ""),
+                        "model": doc.get("model", ""),
+                        "input_tokens": doc.get("input_tokens", 0),
+                        "output_tokens": doc.get("output_tokens", 0),
+                        "cached_tokens": doc.get("cached_tokens", 0),
+                        "uncached_tokens": doc.get("uncached_tokens", 0),
+                        "total_tokens": doc.get("total_tokens", 0),
+                    }
+                )
+
+            return {
+                "date": date_str,
+                "summary": summary,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": total_pages,
+                    "total_count": total_count,
+                },
+                "logs": logs,
+            }
+        except Exception as e:
+            log.error(f"Error fetching request logs from MongoDB: {e}")
+            return {
+                "date": date_str,
+                "summary": {
+                    "total_requests": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cached_tokens": 0,
+                    "uncached_tokens": 0,
+                    "total_tokens": 0,
+                    "cache_hit_rate": 0.0,
+                },
+                "pagination": {"page": page, "page_size": page_size, "total_pages": 0, "total_count": 0},
+                "logs": [],
+            }
+
+    async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
+        """清空指定日期或全部请求日志"""
+        self._ensure_initialized()
+        try:
+            collection = self._db["request_logs"]
+            if date_str and date_str != "all":
+                await collection.delete_many({"date_str": date_str})
+            else:
+                await collection.delete_many({})
+            return True
+        except Exception as e:
+            log.error(f"Error clearing request logs in MongoDB: {e}")
+            return False

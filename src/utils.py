@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from config import get_api_password, get_panel_password
 from fastapi import Depends, HTTPException, Header, Query, Request, status
@@ -330,3 +330,55 @@ async def verify_panel_token(credentials: HTTPAuthorizationCredentials = Depends
     if credentials.credentials != password:
         raise HTTPException(status_code=401, detail="密码错误")
     return credentials.credentials
+
+
+def record_request_log_async(
+    email: Optional[str],
+    mode: str,
+    model: str,
+    usage_metadata: Optional[Dict[str, Any]],
+):
+    """
+    后台安全异步记录请求日志及 Token 消耗，防阻塞。
+    """
+    if not usage_metadata or not isinstance(usage_metadata, dict):
+        return
+
+    prompt_tokens = int(usage_metadata.get("promptTokenCount", 0) or 0)
+    cached_tokens = int(usage_metadata.get("cachedContentTokenCount", 0) or 0)
+    output_tokens = int(usage_metadata.get("candidatesTokenCount", 0) or 0)
+    uncached_tokens = max(prompt_tokens - cached_tokens, 0)
+    total_tokens = int(
+        usage_metadata.get("totalTokenCount", prompt_tokens + output_tokens)
+        or (prompt_tokens + output_tokens)
+    )
+
+    if prompt_tokens > 0 or output_tokens > 0 or cached_tokens > 0:
+        async def _worker():
+            try:
+                from src.storage_adapter import get_storage_adapter
+
+                adapter = await get_storage_adapter()
+                await adapter.add_request_log(
+                    email=email,
+                    mode=mode,
+                    model=model,
+                    input_tokens=prompt_tokens,
+                    output_tokens=output_tokens,
+                    cached_tokens=cached_tokens,
+                    uncached_tokens=uncached_tokens,
+                    total_tokens=total_tokens,
+                )
+            except Exception as e:
+                log.warning(f"Async record_request_log_async worker failed: {e}")
+
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_worker())
+        except RuntimeError:
+            try:
+                import threading
+                threading.Thread(target=lambda: asyncio.run(_worker()), daemon=True).start()
+            except Exception as e:
+                log.warning(f"Async record_request_log_async failed: {e}")

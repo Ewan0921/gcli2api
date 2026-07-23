@@ -23,6 +23,7 @@ from log import log
 
 from src.credential_manager import credential_manager
 from src.httpx_client import stream_post_async, post_async
+from src.utils import record_request_log_async
 
 # 导入共同的基础功能
 from src.api.utils import (
@@ -335,6 +336,31 @@ async def stream_request(
                         success_recorded = True
                         log.debug(f"[GEMINICLI STREAM] 开始接收流式响应，模型: {model_name}")
 
+                    try:
+                        chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
+                        if "usageMetadata" in chunk_str:
+                            user_email = credential_data.get("user_email") or credential_data.get("email") or ""
+                            for line in chunk_str.split("\n"):
+                                line_clean = line.strip()
+                                if not line_clean:
+                                    continue
+                                json_str = line_clean[6:].strip() if line_clean.startswith("data: ") else line_clean
+                                if json_str and json_str != "[DONE]":
+                                    try:
+                                        line_data = json.loads(json_str)
+                                        if isinstance(line_data, dict):
+                                            usage = line_data.get("usageMetadata") or (
+                                                line_data.get("response", {}).get("usageMetadata")
+                                                if isinstance(line_data.get("response"), dict)
+                                                else None
+                                            )
+                                            if usage:
+                                                record_request_log_async(user_email, "geminicli", model_name, usage)
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+
                     yield chunk
 
             # 流式请求完成，检查结果
@@ -519,6 +545,15 @@ async def non_stream_request(
                 await record_api_call_success(
                     credential_manager, current_file, mode="geminicli", model_name=model_name
                 )
+                try:
+                    user_email = credential_data.get("user_email") or credential_data.get("email") or ""
+                    resp_json = json.loads(response.content)
+                    usage = resp_json.get("usageMetadata")
+                    if usage:
+                        record_request_log_async(user_email, "geminicli", model_name, usage)
+                except Exception:
+                    pass
+
                 # 创建响应头,移除压缩相关的header避免重复解压
                 response_headers = dict(response.headers)
                 response_headers.pop('content-encoding', None)

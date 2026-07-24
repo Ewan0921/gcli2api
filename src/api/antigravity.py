@@ -179,11 +179,11 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     now = time.time()
     key = _session_key(request_payload, model)
     first_user_text = _extract_first_user_text(request_payload)
-    user_parts = _extract_user_parts_list(request_payload)
 
-    parts_count = len(user_parts)
-    part0_str = user_parts[0].replace("\r", "").replace("\n", "\\n")[:150] if parts_count > 0 else "无"
-    part1_str = user_parts[1].replace("\r", "").replace("\n", "\\n")[:150] if parts_count > 1 else "无(仅1个part)"
+    target_sub = "你是什么模型呢？"
+    has_target = target_sub in first_user_text
+    target_pos = first_user_text.find(target_sub) if has_target else -1
+    tail_snippet = first_user_text.replace("\r", "").replace("\n", "\\n")[-200:] if first_user_text else "无"
 
     key_hash = hashlib.sha256(first_user_text.encode("utf-8")).hexdigest()[:8] if first_user_text else "none"
 
@@ -197,10 +197,10 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
                 state = AntigravitySessionState(**data)
                 state.step_index += 1
                 state.last_used_at = now
-                log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
+                log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
             else:
                 state = _make_new_state(first_user_text, now)
-                log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
+                log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
             await redis.set(redis_key, json.dumps(state.__dict__), ex=SESSION_TTL_SECONDS)
             return state, key
         except Exception as e:
@@ -212,11 +212,11 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     if state:
         state.step_index += 1
         state.last_used_at = now
-        log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
+        log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
         return state, key
     state = _make_new_state(first_user_text, now)
     _session_states[key] = state
-    log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
+    log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
     return state, key
 
 

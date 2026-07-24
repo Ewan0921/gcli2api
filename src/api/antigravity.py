@@ -517,51 +517,55 @@ async def stream_request(
                         )
                         yield chunk
                         return
+            latest_usage = None
+            async for chunk in stream_gen:
+                # 不是Response，说明是真流，直接yield返回
+                # 只在第一个chunk时记录成功
+                if not success_recorded:
+                    await record_api_call_success(
+                        credential_manager, current_file, mode="antigravity", model_name=model_name
+                    )
+                    success_recorded = True
+                    log.debug(f"[ANTIGRAVITY STREAM] 开始接收流式响应，模型: {model_name}")
+
+                try:
+                    chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
+                    if "usageMetadata" in chunk_str:
+                        for line in chunk_str.split("\n"):
+                            line_clean = line.strip()
+                            if not line_clean:
+                                continue
+                            json_str = line_clean[6:].strip() if line_clean.startswith("data: ") else line_clean
+                            if json_str and json_str != "[DONE]":
+                                try:
+                                    line_data = json.loads(json_str)
+                                    if isinstance(line_data, dict):
+                                        usage = line_data.get("usageMetadata") or (
+                                            line_data.get("response", {}).get("usageMetadata")
+                                            if isinstance(line_data.get("response"), dict)
+                                            else None
+                                        )
+                                        if usage:
+                                            latest_usage = usage
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+                # 记录原始chunk内容（用于调试）
+                if isinstance(chunk, bytes):
+                    log.debug(f"[ANTIGRAVITY STREAM RAW] chunk(bytes): {chunk}")
                 else:
-                    # 不是Response，说明是真流，直接yield返回
-                    # 只在第一个chunk时记录成功
-                    if not success_recorded:
-                        await record_api_call_success(
-                            credential_manager, current_file, mode="antigravity", model_name=model_name
-                        )
-                        success_recorded = True
-                        log.debug(f"[ANTIGRAVITY STREAM] 开始接收流式响应，模型: {model_name}")
+                    log.debug(f"[ANTIGRAVITY STREAM RAW] chunk(str): {chunk}")
 
-                    try:
-                        chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
-                        if "usageMetadata" in chunk_str:
-                            for line in chunk_str.split("\n"):
-                                line_clean = line.strip()
-                                if not line_clean:
-                                    continue
-                                json_str = line_clean[6:].strip() if line_clean.startswith("data: ") else line_clean
-                                if json_str and json_str != "[DONE]":
-                                    try:
-                                        line_data = json.loads(json_str)
-                                        if isinstance(line_data, dict):
-                                            usage = line_data.get("usageMetadata") or (
-                                                line_data.get("response", {}).get("usageMetadata")
-                                                if isinstance(line_data.get("response"), dict)
-                                                else None
-                                            )
-                                            if usage:
-                                                record_request_log_async(user_email, "antigravity", model_name, usage)
-                                    except Exception:
-                                        pass
-                    except Exception:
-                        pass
+                yield chunk
 
-                    # 记录原始chunk内容（用于调试）
-                    if isinstance(chunk, bytes):
-                        log.debug(f"[ANTIGRAVITY STREAM RAW] chunk(bytes): {chunk}")
-                    else:
-                        log.debug(f"[ANTIGRAVITY STREAM RAW] chunk(str): {chunk}")
-
-                    yield chunk
-
-            # 流式请求完成，检查结果
+            # 流式请求完成，检查结果并统一记库 1 次
             if success_recorded:
                 log.debug(f"[ANTIGRAVITY STREAM] 流式响应完成，模型: {model_name}")
+                if latest_usage:
+                    user_email = credential_data.get("user_email") or credential_data.get("email") or ""
+                    record_request_log_async(user_email, "antigravity", model_name, latest_usage)
                 return
             elif not need_retry:
                 # 没有收到任何数据（空回复），需要重试

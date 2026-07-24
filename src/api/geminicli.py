@@ -218,6 +218,7 @@ async def stream_request(
     for attempt in range(max_retries + 1):
         success_recorded = False  # 标记是否已记录成功
         need_retry = False  # 标记是否需要重试
+        latest_usage = None
 
         try:
             async for chunk in stream_post_async(
@@ -327,42 +328,40 @@ async def stream_request(
                         yield chunk
                         return
                 else:
-            latest_usage = None
-            async for chunk in stream_gen:
-                # 不是Response，说明是真流，直接yield返回
-                # 只在第一个chunk时记录成功
-                if not success_recorded:
-                    await record_api_call_success(
-                        credential_manager, current_file, mode="geminicli", model_name=model_name
-                    )
-                    success_recorded = True
-                    log.debug(f"[GEMINICLI STREAM] 开始接收流式响应，模型: {model_name}")
+                    # 不是Response，说明是真流，直接yield返回
+                    # 只在第一个chunk时记录成功
+                    if not success_recorded:
+                        await record_api_call_success(
+                            credential_manager, current_file, mode="geminicli", model_name=model_name
+                        )
+                        success_recorded = True
+                        log.debug(f"[GEMINICLI STREAM] 开始接收流式响应，模型: {model_name}")
 
-                try:
-                    chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
-                    if "usageMetadata" in chunk_str:
-                        for line in chunk_str.split("\n"):
-                            line_clean = line.strip()
-                            if not line_clean:
-                                continue
-                            json_str = line_clean[6:].strip() if line_clean.startswith("data: ") else line_clean
-                            if json_str and json_str != "[DONE]":
-                                try:
-                                    line_data = json.loads(json_str)
-                                    if isinstance(line_data, dict):
-                                        usage = line_data.get("usageMetadata") or (
-                                            line_data.get("response", {}).get("usageMetadata")
-                                            if isinstance(line_data.get("response"), dict)
-                                            else None
-                                        )
-                                        if usage:
-                                            latest_usage = usage
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
+                    try:
+                        chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
+                        if "usageMetadata" in chunk_str:
+                            for line in chunk_str.split("\n"):
+                                line_clean = line.strip()
+                                if not line_clean:
+                                    continue
+                                json_str = line_clean[6:].strip() if line_clean.startswith("data: ") else line_clean
+                                if json_str and json_str != "[DONE]":
+                                    try:
+                                        line_data = json.loads(json_str)
+                                        if isinstance(line_data, dict):
+                                            usage = line_data.get("usageMetadata") or (
+                                                line_data.get("response", {}).get("usageMetadata")
+                                                if isinstance(line_data.get("response"), dict)
+                                                else None
+                                            )
+                                            if usage:
+                                                latest_usage = usage
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
 
-                yield chunk
+                    yield chunk
 
             # 流式请求完成，检查结果并统一写库 1 次
             if success_recorded:

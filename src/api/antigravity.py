@@ -393,6 +393,8 @@ async def stream_request(
     Yields:
         Response对象（错误时）或 bytes流/str流（成功时）
     """
+    await _dump_payload_to_project_root_if_enabled(body)
+
     model_name = body.get("model", "")
     inner_request = body.get("request", body)
     state, session_key = await _get_session_state(inner_request, model_name)

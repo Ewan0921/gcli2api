@@ -536,6 +536,6 @@ async def get_custom_model_mappings() -> dict[str, str]:
 
 async def get_debug_dump_payload_enabled() -> bool:
     """是否开启将输入 Payload 保存到项目根目录 debug_payload.json 的调试功能"""
-    val = await get_config_val("debug_dump_payload", "DEBUG_DUMP_PAYLOAD", "false")
+    val = await get_config_value("debug_dump_payload", "false", env_var="DEBUG_DUMP_PAYLOAD")
     return str(val).strip().lower() in ("true", "1", "yes")
 

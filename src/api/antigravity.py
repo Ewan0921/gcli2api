@@ -56,6 +56,7 @@ class AntigravitySessionState:
     step_index: int
     created_at: float
     last_used_at: float
+    bound_credential_file: Optional[str] = None
 
 
 # 内存回退存储
@@ -143,7 +144,20 @@ def _make_new_state(first_user_text: str, now: float) -> AntigravitySessionState
     )
 
 
-async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -> AntigravitySessionState:
+async def _save_session_state(key: str, state: AntigravitySessionState) -> None:
+    """保存或更新会话状态（如记录绑定的凭证文件名）"""
+    redis = await _get_redis()
+    if redis is not None:
+        redis_key = f"{_REDIS_KEY_PREFIX}{key}"
+        try:
+            await redis.set(redis_key, json.dumps(state.__dict__), ex=SESSION_TTL_SECONDS)
+            return
+        except Exception as e:
+            log.warning(f"[SESSION] Redis save error: {e}")
+    _session_states[key] = state
+
+
+async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -> Tuple[AntigravitySessionState, str]:
     now = time.time()
     key = _session_key(request_payload, model)
     first_user_text = _extract_first_user_text(request_payload)
@@ -165,7 +179,7 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
                 state = _make_new_state(first_user_text, now)
                 log.info(f"[SESSION-MISSED] 🟡 新建会话(Redis未命中) | 原因: 未找到历史会话(或首句消息变化) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
             await redis.set(redis_key, json.dumps(state.__dict__), ex=SESSION_TTL_SECONDS)
-            return state
+            return state, key
         except Exception as e:
             log.warning(f"[SESSION] Redis error, falling back to memory: {e}")
 
@@ -176,11 +190,42 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
         state.step_index += 1
         state.last_used_at = now
         log.info(f"[SESSION-HIT] 🟢 成功续接会话(Memory) | session_id: {state.session_id} | 当前步数: Step {state.step_index} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
-        return state
+        return state, key
     state = _make_new_state(first_user_text, now)
     _session_states[key] = state
     log.info(f"[SESSION-MISSED] 🟡 新建会话(Memory未命中) | 原因: 未找到历史会话(或首句消息变化) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
-    return state
+    return state, key
+
+
+async def get_sticky_credential_for_session(
+    state: AntigravitySessionState,
+    session_key: str,
+    mode: str = "antigravity",
+    model_name: Optional[str] = None
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """
+    根据 Session 绑定的凭证优先获取；若未绑定或已被禁用/冷却，则随机获取可用凭证并重新绑定 (实现 100% Session Affinity + 故障转移)
+    """
+    if state.bound_credential_file:
+        cred = await credential_manager.get_credential_by_filename(
+            state.bound_credential_file, mode=mode, model_name=model_name
+        )
+        if cred:
+            log.info(f"[SESSION-STICKY] 🎯 命中会话绑定账号 | session_id: {state.session_id} | 账号: {state.bound_credential_file}")
+            return cred
+        else:
+            log.warning(f"[SESSION-STICKY] ⚠️ 绑定账号已失效/冷却/禁用 ({state.bound_credential_file})，触发故障转移自动切换新账号")
+
+    # 首次绑定或故障转移重新分配
+    cred = await credential_manager.get_valid_credential(mode=mode, model_name=model_name)
+    if cred:
+        filename, credential_data = cred
+        state.bound_credential_file = filename
+        await _save_session_state(session_key, state)
+        log.info(f"[SESSION-STICKY] 📌 会话成功绑定新账号 | session_id: {state.session_id} | 账号: {filename}")
+        return cred
+
+    return None
 
 
 def _generate_request_id(conversation_id: str, trajectory_id: str, step: int) -> str:
@@ -203,6 +248,7 @@ async def wrap_cli_request(
     gemini_request: Dict[str, Any],
     model: str,
     project_id: str,
+    bound_filename: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], str]:
     """
     将 Gemini 格式请求包装成 Antigravity CLI 格式。
@@ -214,7 +260,12 @@ async def wrap_cli_request(
     inner.pop("safetySettings", None)
 
     # 获取/更新会话状态
-    state = await _get_session_state(inner, model)
+    state, session_key = await _get_session_state(inner, model)
+
+    # 绑定账号粘性
+    if bound_filename and state.bound_credential_file != bound_filename:
+        state.bound_credential_file = bound_filename
+        await _save_session_state(session_key, state)
 
     # 注入 sessionId
     if not inner.get("sessionId"):
@@ -308,10 +359,12 @@ async def stream_request(
         Response对象（错误时）或 bytes流/str流（成功时）
     """
     model_name = body.get("model", "")
+    inner_request = body.get("request", body)
+    state, session_key = await _get_session_state(inner_request, model_name)
 
-    # 1. 获取有效凭证
-    cred_result = await credential_manager.get_valid_credential(
-        mode="antigravity", model_name=model_name
+    # 1. 获取带有 Session 账号粘性的有效凭证
+    cred_result = await get_sticky_credential_for_session(
+        state, session_key, mode="antigravity", model_name=model_name
     )
 
     if not cred_result:
@@ -349,7 +402,7 @@ async def stream_request(
 
     # 构建 CLI 格式请求体
     inner_request = body.get("request", body)
-    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id)
+    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id, bound_filename=current_file)
 
     # 3. 调用stream_post_async进行请求
     retry_config = await get_retry_config()
@@ -614,10 +667,12 @@ async def non_stream_request(
     log.debug("[ANTIGRAVITY] 使用传统非流式模式")
 
     model_name = body.get("model", "")
+    inner_request = body.get("request", body)
+    state, session_key = await _get_session_state(inner_request, model_name)
 
-    # 1. 获取有效凭证
-    cred_result = await credential_manager.get_valid_credential(
-        mode="antigravity", model_name=model_name
+    # 1. 获取带有 Session 账号粘性的有效凭证
+    cred_result = await get_sticky_credential_for_session(
+        state, session_key, mode="antigravity", model_name=model_name
     )
 
     if not cred_result:
@@ -652,8 +707,7 @@ async def non_stream_request(
         auth_headers.update(headers)
 
     # 构建 CLI 格式请求体
-    inner_request = body.get("request", body)
-    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id)
+    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id, bound_filename=current_file)
 
     # 3. 调用post_async进行请求
     retry_config = await get_retry_config()

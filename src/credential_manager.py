@@ -101,6 +101,43 @@ class CredentialManager:
         log.error(f"重试{max_retries}次后仍无可用凭证 (mode={mode}, model_name={model_name})")
         return None
 
+    async def get_credential_by_filename(
+        self, filename: str, mode: str = "antigravity", model_name: Optional[str] = None
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """
+        根据指定的凭证文件名获取凭证（用于实现 Session 账号粘性）
+        如果该指定凭证已禁用、受冷扣或 token 刷新失败，则返回 None
+
+        Args:
+            filename: 凭证文件名（如 "user1@gmail.com.json"）
+            mode: 凭证模式 ("geminicli" 或 "antigravity")
+            model_name: 可选的模型名称，用于检查冷却状态
+        """
+        await self._ensure_initialized()
+        try:
+            credential_data = await self._storage_adapter.get_credential(filename, mode=mode)
+            if not credential_data:
+                return None
+
+            # 检查是否已禁用
+            if credential_data.get("disabled", False):
+                log.debug(f"[STICKY] 绑定凭证已禁用: {filename}")
+                return None
+
+            # Token 刷新检查
+            if await self._should_refresh_token(credential_data):
+                refreshed_data = await self._refresh_token(credential_data, filename, mode=mode)
+                if refreshed_data:
+                    return filename, refreshed_data
+                else:
+                    log.warning(f"[STICKY] 绑定凭证 Token 刷新失败: {filename}")
+                    return None
+
+            return filename, credential_data
+        except Exception as e:
+            log.warning(f"[STICKY] 读取指定凭证失败 {filename}: {e}")
+            return None
+
     async def add_credential(self, credential_name: str, credential_data: Dict[str, Any]):
         """
         新增或更新一个凭证

@@ -33,12 +33,6 @@ def _convert_usage_metadata(usage_metadata: Dict[str, Any], email: Optional[str]
     if not usage_metadata:
         return None
 
-    try:
-        from src.utils import record_request_log_async
-        record_request_log_async(email=email, mode=mode, model=model, usage_metadata=usage_metadata)
-    except Exception:
-        pass
-
     prompt_tokens_total = int(usage_metadata.get("promptTokenCount", 0) or 0)
     cached_tokens = int(usage_metadata.get("cachedContentTokenCount", 0) or 0)
     prompt_tokens = max(prompt_tokens_total - cached_tokens, 0)

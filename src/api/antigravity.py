@@ -147,6 +147,8 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     now = time.time()
     key = _session_key(request_payload, model)
     first_user_text = _extract_first_user_text(request_payload)
+    text_snippet = (first_user_text[:20] + "...") if len(first_user_text) > 20 else (first_user_text or "无")
+    key_hash = hashlib.sha256(first_user_text.encode("utf-8")).hexdigest()[:8] if first_user_text else "none"
 
     redis = await _get_redis()
     if redis is not None:
@@ -158,8 +160,10 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
                 state = AntigravitySessionState(**data)
                 state.step_index += 1
                 state.last_used_at = now
+                log.info(f"[SESSION-HIT] 🟢 成功续接会话(Redis) | session_id: {state.session_id} | 当前步数: Step {state.step_index} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
             else:
                 state = _make_new_state(first_user_text, now)
+                log.info(f"[SESSION-MISSED] 🟡 新建会话(Redis未命中) | 原因: 未找到历史会话(或首句消息变化) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
             await redis.set(redis_key, json.dumps(state.__dict__), ex=SESSION_TTL_SECONDS)
             return state
         except Exception as e:
@@ -171,9 +175,11 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     if state:
         state.step_index += 1
         state.last_used_at = now
+        log.info(f"[SESSION-HIT] 🟢 成功续接会话(Memory) | session_id: {state.session_id} | 当前步数: Step {state.step_index} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
         return state
     state = _make_new_state(first_user_text, now)
     _session_states[key] = state
+    log.info(f"[SESSION-MISSED] 🟡 新建会话(Memory未命中) | 原因: 未找到历史会话(或首句消息变化) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
     return state
 
 

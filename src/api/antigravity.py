@@ -196,8 +196,6 @@ async def _dump_payload_to_project_root_if_enabled(request_payload: Dict[str, An
             with open(dump_file, "w", encoding="utf-8") as f:
                 json.dump(request_payload, f, ensure_ascii=False, indent=2)
             log.info(f"[DEBUG DUMP] 💥 完整 Request Payload 已成功保存到项目根目录: {dump_file}")
-        else:
-            log.info("[DEBUG DUMP] ℹ️ 存盘功能当前处于关闭状态 (如需存盘请在 .env 中配置 DEBUG_DUMP_PAYLOAD=true)")
     except Exception as e:
         log.warning(f"[DEBUG DUMP] 保存 debug_payload.json 失败: {e}")
 

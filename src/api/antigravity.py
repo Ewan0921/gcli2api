@@ -93,37 +93,44 @@ async def _get_redis():
 
 
 def _extract_first_user_text(request_payload: Dict[str, Any]) -> str:
-    """提取第一条 user 消息中的所有 parts 文本拼接结果"""
+    """
+    提取会话 Key 的文本来源。
+    优先取包含 <user_query> 标签归属的完整 text 字符串；
+    若没有 <user_query>，则过滤纯系统环境/MCP配置，取第一条真实 user 消息的完整 text。
+    """
     contents = request_payload.get("contents", [])
     if not isinstance(contents, list):
         return ""
+
+    # 1. 优先扫描寻找包含 <user_query> 标签的那一个 part 的完整 text 信息
     for content in contents:
-        if not isinstance(content, dict) or content.get("role") != "user":
-            continue
-        parts = content.get("parts", [])
-        if not isinstance(parts, list):
-            continue
-        texts = [str(part["text"]) for part in parts if isinstance(part, dict) and part.get("text")]
-        if texts:
-            return "\n".join(texts)
+        if isinstance(content, dict) and content.get("role") == "user":
+            parts = content.get("parts", [])
+            if isinstance(parts, list):
+                for part in parts:
+                    if isinstance(part, dict) and part.get("text"):
+                        text_str = str(part["text"])
+                        if "<user_query>" in text_str:
+                            return text_str
+
+    # 2. 保底逻辑：过滤纯静态系统/MCP环境描述，取第一条真实 user 消息的完整 text 拼接
+    for content in contents:
+        if isinstance(content, dict) and content.get("role") == "user":
+            parts = content.get("parts", [])
+            if isinstance(parts, list):
+                valid_texts = []
+                is_system_meta = False
+                for part in parts:
+                    if isinstance(part, dict) and part.get("text"):
+                        text_str = str(part["text"])
+                        if "<mcp_server_catalog>" in text_str or "<user_info>" in text_str:
+                            is_system_meta = True
+                            break
+                        valid_texts.append(text_str)
+                if not is_system_meta and valid_texts:
+                    return "\n".join(valid_texts)
+
     return ""
-
-
-def _extract_user_parts_list(request_payload: Dict[str, Any]) -> List[str]:
-    """提取第一条 user 消息中的各个 part 文本列表（便于调试粒度）"""
-    contents = request_payload.get("contents", [])
-    if not isinstance(contents, list):
-        return []
-    for content in contents:
-        if not isinstance(content, dict) or content.get("role") != "user":
-            continue
-        parts = content.get("parts", [])
-        if not isinstance(parts, list):
-            continue
-        texts = [str(part["text"]) for part in parts if isinstance(part, dict) and part.get("text")]
-        if texts:
-            return texts
-    return []
 
 
 def _session_key(request_payload: Dict[str, Any], model: str = "") -> str:

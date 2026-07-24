@@ -206,12 +206,6 @@ def _anthropic_usage_from_metadata(usage_metadata: Any, email: Optional[str] = N
     if not isinstance(usage_metadata, dict):
         return {"input_tokens": 0, "output_tokens": 0}
 
-    try:
-        from src.utils import record_request_log_async
-        record_request_log_async(email=email, mode=mode, model=model, usage_metadata=usage_metadata)
-    except Exception:
-        pass
-
     prompt_tokens_total = int(usage_metadata.get("promptTokenCount", 0) or 0)
     cached_tokens = _cached_content_token_count(usage_metadata)
     usage = {

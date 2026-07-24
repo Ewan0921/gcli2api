@@ -530,7 +530,6 @@ async def stream_request(
                     try:
                         chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
                         if "usageMetadata" in chunk_str:
-                            user_email = credential_data.get("user_email") or credential_data.get("email") or ""
                             for line in chunk_str.split("\n"):
                                 line_clean = line.strip()
                                 if not line_clean:

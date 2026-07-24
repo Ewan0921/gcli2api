@@ -88,6 +88,7 @@ async def _get_redis():
 
 
 def _extract_first_user_text(request_payload: Dict[str, Any]) -> str:
+    """提取第一条 user 消息中的所有 parts 文本拼接结果"""
     contents = request_payload.get("contents", [])
     if not isinstance(contents, list):
         return ""
@@ -97,10 +98,27 @@ def _extract_first_user_text(request_payload: Dict[str, Any]) -> str:
         parts = content.get("parts", [])
         if not isinstance(parts, list):
             continue
-        for part in parts:
-            if isinstance(part, dict) and part.get("text"):
-                return str(part["text"])
+        texts = [str(part["text"]) for part in parts if isinstance(part, dict) and part.get("text")]
+        if texts:
+            return "\n".join(texts)
     return ""
+
+
+def _extract_user_parts_list(request_payload: Dict[str, Any]) -> List[str]:
+    """提取第一条 user 消息中的各个 part 文本列表（便于调试粒度）"""
+    contents = request_payload.get("contents", [])
+    if not isinstance(contents, list):
+        return []
+    for content in contents:
+        if not isinstance(content, dict) or content.get("role") != "user":
+            continue
+        parts = content.get("parts", [])
+        if not isinstance(parts, list):
+            continue
+        texts = [str(part["text"]) for part in parts if isinstance(part, dict) and part.get("text")]
+        if texts:
+            return texts
+    return []
 
 
 def _session_key(request_payload: Dict[str, Any], model: str = "") -> str:
@@ -161,15 +179,13 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     now = time.time()
     key = _session_key(request_payload, model)
     first_user_text = _extract_first_user_text(request_payload)
-    clean_text_preview = first_user_text.replace("\r", "").replace("\n", "\\n")
-    text_snippet = (clean_text_preview[:1000] + "...") if len(clean_text_preview) > 1000 else (clean_text_preview or "无")
-    key_hash = hashlib.sha256(first_user_text.encode("utf-8")).hexdigest()[:8] if first_user_text else "none"
+    user_parts = _extract_user_parts_list(request_payload)
 
-    # 实测验证：提取 </user_info> 后的真正用户提问
-    has_user_info = "</user_info>" in first_user_text
-    real_prompt = ""
-    if has_user_info:
-        real_prompt = first_user_text.split("</user_info>", 1)[1].replace("\r", "").replace("\n", "\\n").strip()[:100]
+    parts_count = len(user_parts)
+    part0_str = user_parts[0].replace("\r", "").replace("\n", "\\n")[:150] if parts_count > 0 else "无"
+    part1_str = user_parts[1].replace("\r", "").replace("\n", "\\n")[:150] if parts_count > 1 else "无(仅1个part)"
+
+    key_hash = hashlib.sha256(first_user_text.encode("utf-8")).hexdigest()[:8] if first_user_text else "none"
 
     redis = await _get_redis()
     if redis is not None:
@@ -181,10 +197,10 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
                 state = AntigravitySessionState(**data)
                 state.step_index += 1
                 state.last_used_at = now
-                log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文长度: {len(first_user_text)}")
+                log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
             else:
                 state = _make_new_state(first_user_text, now)
-                log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文长度: {len(first_user_text)}")
+                log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
             await redis.set(redis_key, json.dumps(state.__dict__), ex=SESSION_TTL_SECONDS)
             return state, key
         except Exception as e:
@@ -196,11 +212,11 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     if state:
         state.step_index += 1
         state.last_used_at = now
-        log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文(前1000字): '{text_snippet}'")
+        log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
         return state, key
     state = _make_new_state(first_user_text, now)
     _session_states[key] = state
-    log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文(前1000字): '{text_snippet}'")
+    log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | partsCount: {parts_count} | part[0]: '{part0_str}' | part[1]: '{part1_str}'")
     return state, key
 
 

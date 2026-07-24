@@ -179,11 +179,14 @@ async def _save_session_state(key: str, state: AntigravitySessionState) -> None:
 async def _dump_payload_to_project_root_if_enabled(request_payload: Dict[str, Any]) -> None:
     """如果启用了 DEBUG_DUMP_PAYLOAD，将传入的数据完整保存到项目根目录下的 debug_payload.json"""
     try:
-        if await get_debug_dump_payload_enabled():
+        enabled = await get_debug_dump_payload_enabled()
+        if enabled:
             dump_file = project_root / "debug_payload.json"
             with open(dump_file, "w", encoding="utf-8") as f:
                 json.dump(request_payload, f, ensure_ascii=False, indent=2)
             log.info(f"[DEBUG DUMP] 💥 完整 Request Payload 已成功保存到项目根目录: {dump_file}")
+        else:
+            log.info("[DEBUG DUMP] ℹ️ 存盘功能当前处于关闭状态 (如需存盘请在 .env 中配置 DEBUG_DUMP_PAYLOAD=true)")
     except Exception as e:
         log.warning(f"[DEBUG DUMP] 保存 debug_payload.json 失败: {e}")
 

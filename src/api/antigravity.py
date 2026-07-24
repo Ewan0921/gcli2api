@@ -12,6 +12,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Callable, Tuple
+from pathlib import Path
+
+# 项目根目录 (src/api/antigravity.py 向上 3 级)
+project_root = Path(__file__).resolve().parent.parent.parent
 
 from fastapi import Response
 from config import (

@@ -33,6 +33,7 @@ ENV_MAPPINGS = {
     "AUTO_BAN": "auto_ban_enabled",
     "AUTO_BAN_ERROR_CODES": "auto_ban_error_codes",
     "RETRY_429_MAX_RETRIES": "retry_429_max_retries",
+    "DEBUG_DUMP_PAYLOAD": "debug_dump_payload",
     "RETRY_429_ENABLED": "retry_429_enabled",
     "RETRY_429_INTERVAL": "retry_429_interval",
     "ANTI_TRUNCATION_MAX_ATTEMPTS": "anti_truncation_max_attempts",
@@ -531,4 +532,10 @@ async def get_custom_model_mappings() -> dict[str, str]:
             pass
 
     return {}
+
+
+async def get_debug_dump_payload_enabled() -> bool:
+    """是否开启将输入 Payload 保存到项目根目录 debug_payload.json 的调试功能"""
+    val = await get_config_val("debug_dump_payload", "DEBUG_DUMP_PAYLOAD", "false")
+    return str(val).strip().lower() in ("true", "1", "yes")
 

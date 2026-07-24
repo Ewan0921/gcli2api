@@ -18,6 +18,7 @@ from config import (
     get_antigravity_api_url,
     get_antigravity_stream2nostream,
     get_auto_ban_error_codes,
+    get_debug_dump_payload_enabled,
 )
 from log import log
 
@@ -175,16 +176,27 @@ async def _save_session_state(key: str, state: AntigravitySessionState) -> None:
     _session_states[key] = state
 
 
+async def _dump_payload_to_project_root_if_enabled(request_payload: Dict[str, Any]) -> None:
+    """如果启用了 DEBUG_DUMP_PAYLOAD，将传入的数据完整保存到项目根目录下的 debug_payload.json"""
+    try:
+        if await get_debug_dump_payload_enabled():
+            dump_file = project_root / "debug_payload.json"
+            with open(dump_file, "w", encoding="utf-8") as f:
+                json.dump(request_payload, f, ensure_ascii=False, indent=2)
+            log.info(f"[DEBUG DUMP] 💥 完整 Request Payload 已成功保存到项目根目录: {dump_file}")
+    except Exception as e:
+        log.warning(f"[DEBUG DUMP] 保存 debug_payload.json 失败: {e}")
+
+
 async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -> Tuple[AntigravitySessionState, str]:
+    # 检查是否需要导出保存完整 Payload 到根目录
+    await _dump_payload_to_project_root_if_enabled(request_payload)
+
     now = time.time()
     key = _session_key(request_payload, model)
     first_user_text = _extract_first_user_text(request_payload)
-
-    target_sub = "你是什么模型呢？"
-    has_target = target_sub in first_user_text
-    target_pos = first_user_text.find(target_sub) if has_target else -1
-    tail_snippet = first_user_text.replace("\r", "").replace("\n", "\\n")[-200:] if first_user_text else "无"
-
+    clean_text_preview = first_user_text.replace("\r", "").replace("\n", "\\n")
+    text_snippet = (clean_text_preview[:40] + "...") if len(clean_text_preview) > 40 else (clean_text_preview or "无")
     key_hash = hashlib.sha256(first_user_text.encode("utf-8")).hexdigest()[:8] if first_user_text else "none"
 
     redis = await _get_redis()
@@ -197,10 +209,10 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
                 state = AntigravitySessionState(**data)
                 state.step_index += 1
                 state.last_used_at = now
-                log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
+                log.info(f"[SESSION-HIT] 🟢 成功续接会话(Redis) | session_id: {state.session_id} | 当前步数: Step {state.step_index} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
             else:
                 state = _make_new_state(first_user_text, now)
-                log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
+                log.info(f"[SESSION-MISSED] 🟡 新建会话(Redis未命中) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
             await redis.set(redis_key, json.dumps(state.__dict__), ex=SESSION_TTL_SECONDS)
             return state, key
         except Exception as e:
@@ -212,11 +224,11 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     if state:
         state.step_index += 1
         state.last_used_at = now
-        log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
+        log.info(f"[SESSION-HIT] 🟢 成功续接会话(Memory) | session_id: {state.session_id} | 当前步数: Step {state.step_index} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
         return state, key
     state = _make_new_state(first_user_text, now)
     _session_states[key] = state
-    log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 目标字符串在否: {has_target} (位置:{target_pos}) | 结尾200字: '{tail_snippet}'")
+    log.info(f"[SESSION-MISSED] 🟡 新建会话(Memory未命中) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句: '{text_snippet}'")
     return state, key
 
 

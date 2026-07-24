@@ -162,8 +162,14 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     key = _session_key(request_payload, model)
     first_user_text = _extract_first_user_text(request_payload)
     clean_text_preview = first_user_text.replace("\r", "").replace("\n", "\\n")
-    text_snippet = (clean_text_preview[:150] + "...") if len(clean_text_preview) > 150 else (clean_text_preview or "无")
+    text_snippet = (clean_text_preview[:1000] + "...") if len(clean_text_preview) > 1000 else (clean_text_preview or "无")
     key_hash = hashlib.sha256(first_user_text.encode("utf-8")).hexdigest()[:8] if first_user_text else "none"
+
+    # 实测验证：提取 </user_info> 后的真正用户提问
+    has_user_info = "</user_info>" in first_user_text
+    real_prompt = ""
+    if has_user_info:
+        real_prompt = first_user_text.split("</user_info>", 1)[1].replace("\r", "").replace("\n", "\\n").strip()[:100]
 
     redis = await _get_redis()
     if redis is not None:
@@ -175,10 +181,10 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
                 state = AntigravitySessionState(**data)
                 state.step_index += 1
                 state.last_used_at = now
-                log.info(f"[SESSION-HIT] 🟢 成功续接会话(Redis) | session_id: {state.session_id} | 当前步数: Step {state.step_index} | 模型: {model} | 哈希: {key_hash} | 首句(150字): '{text_snippet}'")
+                log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文长度: {len(first_user_text)}")
             else:
                 state = _make_new_state(first_user_text, now)
-                log.info(f"[SESSION-MISSED] 🟡 新建会话(Redis未命中) | 原因: 未找到历史会话(或首句消息变化) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句(150字): '{text_snippet}'")
+                log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文长度: {len(first_user_text)}")
             await redis.set(redis_key, json.dumps(state.__dict__), ex=SESSION_TTL_SECONDS)
             return state, key
         except Exception as e:
@@ -190,11 +196,11 @@ async def _get_session_state(request_payload: Dict[str, Any], model: str = "") -
     if state:
         state.step_index += 1
         state.last_used_at = now
-        log.info(f"[SESSION-HIT] 🟢 成功续接会话(Memory) | session_id: {state.session_id} | 当前步数: Step {state.step_index} | 模型: {model} | 哈希: {key_hash} | 首句(150字): '{text_snippet}'")
+        log.info(f"[SESSION-HIT] 🟢 续接 | session_id: {state.session_id} | Step: {state.step_index} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文(前1000字): '{text_snippet}'")
         return state, key
     state = _make_new_state(first_user_text, now)
     _session_states[key] = state
-    log.info(f"[SESSION-MISSED] 🟡 新建会话(Memory未命中) | 原因: 未找到历史会话(或首句消息变化) | 新 session_id: {state.session_id} | 模型: {model} | 哈希: {key_hash} | 首句(150字): '{text_snippet}'")
+    log.info(f"[SESSION-MISSED] 🟡 新建 | session_id: {state.session_id} | 哈希: {key_hash} | 真实提问: '{real_prompt}' | 全文(前1000字): '{text_snippet}'")
     return state, key
 
 

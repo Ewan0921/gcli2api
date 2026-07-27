@@ -17,20 +17,34 @@ router = APIRouter(prefix="/panel/api/stats", tags=["stats"])
 
 @router.get("/token_logs")
 async def get_token_logs(
-    date: Optional[str] = Query(None, description="指定查询日期，格式 YYYY-MM-DD，默认今天"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD，默认当月1号"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD，默认今天"),
+    date: Optional[str] = Query(None, description="兼容旧版单天日期参数"),
     page: int = Query(1, ge=1, description="页码，默认 1"),
     page_size: int = Query(50, ge=1, le=200, description="每页条数，默认 50"),
     token: str = Depends(verify_panel_token),
 ):
-    """获取指定日期的 Token 使用量与请求日志明细"""
+    """获取指定日期范围的 Token 使用量与请求日志明细"""
     try:
-        if not date:
-            now = datetime.now(tz=timezone.utc).astimezone()
-            date = now.strftime("%Y-%m-%d")
+        from src.utils import CHINA_TZ
+        now = datetime.now(tz=CHINA_TZ)
+
+        # 兼容旧版的 date 参数
+        if date:
+            if not start_date:
+                start_date = date
+            if not end_date:
+                end_date = date
+
+        if not start_date:
+            start_date = now.strftime("%Y-%m-01")
+        if not end_date:
+            end_date = now.strftime("%Y-%m-%d")
 
         adapter = await get_storage_adapter()
         result = await adapter.get_request_logs(
-            date_str=date,
+            start_date_str=start_date,
+            end_date_str=end_date,
             page=page,
             page_size=page_size,
         )
@@ -41,7 +55,8 @@ async def get_token_logs(
             status_code=500,
             content={
                 "error": f"获取 Token 日志失败: {str(e)}",
-                "date": date or "",
+                "start_date": start_date or "",
+                "end_date": end_date or "",
                 "summary": {
                     "total_requests": 0,
                     "input_tokens": 0,

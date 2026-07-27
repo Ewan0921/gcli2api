@@ -382,3 +382,26 @@ def record_request_log_async(
                 threading.Thread(target=lambda: asyncio.run(_worker()), daemon=True).start()
             except Exception as e:
                 log.warning(f"Async record_request_log_async failed: {e}")
+
+
+from datetime import datetime, timezone, timedelta
+from typing import Tuple
+
+CHINA_TZ = timezone(timedelta(hours=8))
+
+
+def get_timezone_timestamp_range(date_str: str, tz_offset_hours: int = 8) -> Tuple[float, float]:
+    """
+    将给定的 date_str (YYYY-MM-DD) 解析为指定时区（默认 UTC+8 北京时间）下的 00:00:00.000000 至 23:59:59.999999 的 Unix 时间戳范围
+    """
+    tz = timezone(timedelta(hours=tz_offset_hours))
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        dt_start = dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+        dt_end = dt.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
+        return dt_start.timestamp(), dt_end.timestamp()
+    except Exception:
+        now = datetime.now(tz=tz)
+        dt_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        dt_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return dt_start.timestamp(), dt_end.timestamp()

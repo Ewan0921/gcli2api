@@ -88,11 +88,13 @@ class StorageBackend(Protocol):
 
     async def get_request_logs(
         self,
-        date_str: str,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: str = "",
         page: int = 1,
         page_size: int = 50,
     ) -> Dict[str, Any]:
-        """获取指定日期的请求日志及统计信息"""
+        """获取指定日期范围的请求日志及统计信息"""
         ...
 
     async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
@@ -271,14 +273,22 @@ class StorageAdapter:
 
     async def get_request_logs(
         self,
-        date_str: str,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: str = "",
         page: int = 1,
         page_size: int = 50,
     ) -> Dict[str, Any]:
-        """获取指定日期的请求日志及统计信息"""
+        """获取指定日期范围的请求日志及统计信息"""
         self._ensure_initialized()
+        if date_str:
+            if not start_date_str:
+                start_date_str = date_str
+            if not end_date_str:
+                end_date_str = date_str
         return await self._backend.get_request_logs(
-            date_str=date_str,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
             page=page,
             page_size=page_size,
         )

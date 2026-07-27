@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiosqlite
 
 from log import log
+from src.utils import get_timezone_timestamp_range, CHINA_TZ
 
 
 class SQLiteManager:
@@ -1412,7 +1413,7 @@ class SQLiteManager:
         """记录请求日志，同时删除6个月（180天）以前的数据"""
         self._ensure_initialized()
         now = time.time()
-        date_str = datetime.fromtimestamp(now, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
+        date_str = datetime.fromtimestamp(now, tz=CHINA_TZ).strftime("%Y-%m-%d")
         cutoff_time = now - (180 * 86400)
 
         try:
@@ -1446,12 +1447,21 @@ class SQLiteManager:
 
     async def get_request_logs(
         self,
-        date_str: str,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: str = "",
         page: int = 1,
         page_size: int = 50,
     ) -> Dict[str, Any]:
-        """获取指定日期的请求日志及统计信息"""
+        """获取指定日期范围的请求日志及统计信息（基于时间戳范围查询）"""
         self._ensure_initialized()
+        if date_str:
+            if not start_date_str:
+                start_date_str = date_str
+            if not end_date_str:
+                end_date_str = date_str
+        start_ts, _ = get_timezone_timestamp_range(start_date_str)
+        _, end_ts = get_timezone_timestamp_range(end_date_str)
         try:
             async with aiosqlite.connect(self._db_path) as db:
                 async with db.execute(
@@ -1464,9 +1474,9 @@ class SQLiteManager:
                         COALESCE(SUM(uncached_tokens), 0),
                         COALESCE(SUM(total_tokens), 0)
                     FROM request_logs
-                    WHERE date_str = ?
+                    WHERE created_at >= ? AND created_at <= ?
                     """,
-                    (date_str,),
+                    (start_ts, end_ts),
                 ) as cursor:
                     summary_row = await cursor.fetchone()
 
@@ -1498,15 +1508,15 @@ class SQLiteManager:
                     SELECT id, created_at, email, mode, model,
                            input_tokens, output_tokens, cached_tokens, uncached_tokens, total_tokens
                     FROM request_logs
-                    WHERE date_str = ?
+                    WHERE created_at >= ? AND created_at <= ?
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
                     """,
-                    (date_str, page_size, offset),
+                    (start_ts, end_ts, page_size, offset),
                 ) as cursor:
                     rows = await cursor.fetchall()
                     for row in rows:
-                        created_at_dt = datetime.fromtimestamp(row[1], tz=timezone.utc).astimezone()
+                        created_at_dt = datetime.fromtimestamp(row[1], tz=CHINA_TZ)
                         logs.append(
                             {
                                 "id": row[0],

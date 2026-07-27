@@ -2329,36 +2329,44 @@
                         <h3 style="margin: 0; color: #fff; font-size: 18px; display: flex; align-items: center; gap: 8px;">
                             <span>📊</span> Token 消耗与请求日志
                         </h3>
-                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                            <label for="tokenStatsDate" style="margin: 0; font-size: 14px; color: #aaa;">选择日期：</label>
-                            <input type="date" id="tokenStatsDate" style="padding: 6px 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fff; font-size: 14px;" onchange="loadTokenStats(1)" />
-                            <button class="btn" style="width: auto; padding: 6px 16px; margin: 0; font-size: 14px;" onclick="loadTokenStats(1)">🔍 查询</button>
-                            <button class="btn" style="width: auto; padding: 6px 14px; margin: 0; font-size: 13px; background: #dc3545; border-color: #dc3545;" onclick="clearTokenLogs('day')">🗑️ 清空当日脏数据</button>
-                            <button class="btn" style="width: auto; padding: 6px 14px; margin: 0; font-size: 13px; background: #6c757d; border-color: #6c757d;" onclick="clearTokenLogs('all')">⚠️ 清空全部历史数据</button>
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <label style="margin: 0; font-size: 14px; color: #aaa;">日期范围：</label>
+                            <input type="date" id="tokenStatsStartDate" style="padding: 6px 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fff; font-size: 13px;" onchange="loadTokenStats(1)" />
+                            <span style="color: #888;">至</span>
+                            <input type="date" id="tokenStatsEndDate" style="padding: 6px 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fff; font-size: 13px;" onchange="loadTokenStats(1)" />
+                            <button class="btn" style="width: auto; padding: 6px 14px; margin: 0; font-size: 13px;" onclick="loadTokenStats(1)">🔍 查询</button>
+
+                            <button class="btn" style="width: auto; padding: 5px 12px; margin: 0; font-size: 12px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);" onclick="setTokenStatsDateQuick('this_month')">📅 本月</button>
+                            <button class="btn" style="width: auto; padding: 5px 12px; margin: 0; font-size: 12px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);" onclick="setTokenStatsDateQuick('last_month')">📆 上月</button>
+                            <button class="btn" style="width: auto; padding: 5px 12px; margin: 0; font-size: 12px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);" onclick="setTokenStatsDateQuick('today')">☀️ 今天</button>
+                            <button class="btn" style="width: auto; padding: 5px 12px; margin: 0; font-size: 12px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);" onclick="setTokenStatsDateQuick('last_7_days')">⏱️ 近7天</button>
+
+                            <button class="btn" style="width: auto; padding: 6px 12px; margin: 0; font-size: 13px; background: #dc3545; border-color: #dc3545;" onclick="clearTokenLogs('day')">🗑️ 清空当前范围</button>
+                            <button class="btn" style="width: auto; padding: 6px 12px; margin: 0; font-size: 13px; background: #6c757d; border-color: #6c757d;" onclick="clearTokenLogs('all')">⚠️ 清空全部历史</button>
                         </div>
                     </div>
 
                     <!-- 5个精致平铺数据卡片 -->
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                        <div style="background: rgba(13, 110, 253, 0.1); border: 1px solid rgba(13, 110, 253, 0.3); padding: 16px; border-radius: 10px;">
+                        <div style="background: rgba(13, 110, 253, 0.1); border: 1px solid rgba(13, 110, 253, 0.3); padding: 16px; border-radius: 10px; text-align: center;">
                             <div style="font-size: 12px; color: #6ea8fe; font-weight: bold; margin-bottom: 6px;">📥 输入 Token 总数</div>
-                            <div id="statInputTokens" style="font-size: 22px; font-weight: bold; color: #9ec5fe;">0</div>
+                            <div id="statInputTokens" style="font-size: 22px; font-weight: bold; color: #9ec5fe; text-align: center;">0</div>
                         </div>
-                        <div style="background: rgba(25, 135, 84, 0.1); border: 1px solid rgba(25, 135, 84, 0.3); padding: 16px; border-radius: 10px;">
+                        <div style="background: rgba(25, 135, 84, 0.1); border: 1px solid rgba(25, 135, 84, 0.3); padding: 16px; border-radius: 10px; text-align: center;">
                             <div style="font-size: 12px; color: #75b798; font-weight: bold; margin-bottom: 6px;">📤 输出 Token 总数</div>
-                            <div id="statOutputTokens" style="font-size: 22px; font-weight: bold; color: #a3cfbb;">0</div>
+                            <div id="statOutputTokens" style="font-size: 22px; font-weight: bold; color: #a3cfbb; text-align: center;">0</div>
                         </div>
-                        <div style="background: rgba(13, 202, 240, 0.1); border: 1px solid rgba(13, 202, 240, 0.3); padding: 16px; border-radius: 10px;">
+                        <div style="background: rgba(13, 202, 240, 0.1); border: 1px solid rgba(13, 202, 240, 0.3); padding: 16px; border-radius: 10px; text-align: center;">
                             <div style="font-size: 12px; color: #6edff6; font-weight: bold; margin-bottom: 6px;">⚡ 缓存命中 Token</div>
-                            <div id="statCachedTokens" style="font-size: 22px; font-weight: bold; color: #9eeaf9;">0</div>
+                            <div id="statCachedTokens" style="font-size: 22px; font-weight: bold; color: #9eeaf9; text-align: center;">0</div>
                         </div>
-                        <div style="background: rgba(253, 126, 20, 0.1); border: 1px solid rgba(253, 126, 20, 0.3); padding: 16px; border-radius: 10px;">
+                        <div style="background: rgba(253, 126, 20, 0.1); border: 1px solid rgba(253, 126, 20, 0.3); padding: 16px; border-radius: 10px; text-align: center;">
                             <div style="font-size: 12px; color: #feb272; font-weight: bold; margin-bottom: 6px;">🎯 缓存未命中 Token</div>
-                            <div id="statUncachedTokens" style="font-size: 22px; font-weight: bold; color: #ffe5d0;">0</div>
+                            <div id="statUncachedTokens" style="font-size: 22px; font-weight: bold; color: #ffe5d0; text-align: center;">0</div>
                         </div>
-                        <div style="background: rgba(111, 66, 193, 0.1); border: 1px solid rgba(111, 66, 193, 0.3); padding: 16px; border-radius: 10px;">
+                        <div style="background: rgba(111, 66, 193, 0.1); border: 1px solid rgba(111, 66, 193, 0.3); padding: 16px; border-radius: 10px; text-align: center;">
                             <div style="font-size: 12px; color: #c599e9; font-weight: bold; margin-bottom: 6px;">📈 缓存命中率 (Cache Hit Rate)</div>
-                            <div id="statCacheHitRate" style="font-size: 22px; font-weight: bold; color: #e2c5f6;">0.00%</div>
+                            <div id="statCacheHitRate" style="font-size: 22px; font-weight: bold; color: #e2c5f6; text-align: center;">0.00%</div>
                         </div>
                     </div>
 
@@ -2371,16 +2379,16 @@
                     <div style="overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap;">
                             <thead>
-                                <tr style="background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); text-align: left;">
-                                    <th style="padding: 12px 15px; color: #aaa;">请求时间</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">账号邮箱</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">模式</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">模型名称</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">输入 Token</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">输出 Token</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">缓存命中</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">缓存未命中</th>
-                                    <th style="padding: 12px 15px; color: #aaa;">总 Token</th>
+                                <tr style="background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); text-align: center;">
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">请求时间</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">账号邮箱</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">模式</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">模型名称</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">输入 Token</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">输出 Token</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">缓存命中</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">缓存未命中</th>
+                                    <th style="padding: 12px 15px; color: #aaa; text-align: center;">总 Token</th>
                                 </tr>
                             </thead>
                             <tbody id="tokenStatsTbody">

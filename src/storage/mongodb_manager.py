@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from log import log
+from src.utils import get_timezone_timestamp_range, CHINA_TZ
 
 
 class MongoDBManager:
@@ -1551,7 +1552,7 @@ class MongoDBManager:
         """记录请求日志，同时删除6个月（180天）以前的数据"""
         self._ensure_initialized()
         now = time.time()
-        date_str = datetime.fromtimestamp(now, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
+        date_str = datetime.fromtimestamp(now, tz=CHINA_TZ).strftime("%Y-%m-%d")
         cutoff_time = now - (180 * 86400)
 
         try:
@@ -1578,16 +1579,25 @@ class MongoDBManager:
 
     async def get_request_logs(
         self,
-        date_str: str,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: str = "",
         page: int = 1,
         page_size: int = 50,
     ) -> Dict[str, Any]:
-        """获取指定日期的请求日志及统计信息"""
+        """获取指定日期范围的请求日志及统计信息（基于时间戳范围查询）"""
         self._ensure_initialized()
+        if date_str:
+            if not start_date_str:
+                start_date_str = date_str
+            if not end_date_str:
+                end_date_str = date_str
+        start_ts, _ = get_timezone_timestamp_range(start_date_str)
+        _, end_ts = get_timezone_timestamp_range(end_date_str)
         try:
             collection = self._db["request_logs"]
             pipeline = [
-                {"$match": {"date_str": date_str}},
+                {"$match": {"created_at": {"$gte": start_ts, "$lte": end_ts}}},
                 {
                     "$group": {
                         "_id": None,
@@ -1628,13 +1638,13 @@ class MongoDBManager:
             skip = (page - 1) * page_size
             total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
 
-            cursor = collection.find({"date_str": date_str}).sort("created_at", -1).skip(skip).limit(page_size)
+            cursor = collection.find({"created_at": {"$gte": start_ts, "$lte": end_ts}}).sort("created_at", -1).skip(skip).limit(page_size)
             docs = await cursor.to_list(length=page_size)
 
             logs = []
             for doc in docs:
                 created_at_val = doc.get("created_at", 0)
-                created_at_dt = datetime.fromtimestamp(created_at_val, tz=timezone.utc).astimezone()
+                created_at_dt = datetime.fromtimestamp(created_at_val, tz=CHINA_TZ)
                 logs.append(
                     {
                         "id": str(doc.get("_id", "")),

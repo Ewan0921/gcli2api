@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import asyncpg
 
 from log import log
+from src.utils import get_timezone_timestamp_range, CHINA_TZ
 
 
 class PSQLManager:
@@ -1068,7 +1069,7 @@ class PSQLManager:
         """记录请求日志，同时删除6个月（180天）以前的数据"""
         self._ensure_initialized()
         now = time.time()
-        date_str = datetime.fromtimestamp(now, tz=timezone.utc).astimezone().strftime("%Y-%m-%d")
+        date_str = datetime.fromtimestamp(now, tz=CHINA_TZ).strftime("%Y-%m-%d")
         cutoff_time = now - (180 * 86400)
 
         try:
@@ -1099,12 +1100,21 @@ class PSQLManager:
 
     async def get_request_logs(
         self,
-        date_str: str,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: str = "",
         page: int = 1,
         page_size: int = 50,
     ) -> Dict[str, Any]:
-        """获取指定日期的请求日志及统计信息"""
+        """获取指定日期范围的请求日志及统计信息（基于时间戳范围查询）"""
         self._ensure_initialized()
+        if date_str:
+            if not start_date_str:
+                start_date_str = date_str
+            if not end_date_str:
+                end_date_str = date_str
+        start_ts, _ = get_timezone_timestamp_range(start_date_str)
+        _, end_ts = get_timezone_timestamp_range(end_date_str)
         try:
             async with self._pool.acquire() as conn:
                 summary_row = await conn.fetchrow(
@@ -1117,9 +1127,10 @@ class PSQLManager:
                         COALESCE(SUM(uncached_tokens), 0)::INT AS uncached_tokens,
                         COALESCE(SUM(total_tokens), 0)::INT AS total_tokens
                     FROM request_logs
-                    WHERE date_str = $1
+                    WHERE created_at >= $1 AND created_at <= $2
                     """,
-                    date_str,
+                    start_ts,
+                    end_ts,
                 )
 
                 total_count = summary_row["total_count"] if summary_row else 0
@@ -1149,18 +1160,19 @@ class PSQLManager:
                     SELECT id, created_at, email, mode, model,
                            input_tokens, output_tokens, cached_tokens, uncached_tokens, total_tokens
                     FROM request_logs
-                    WHERE date_str = $1
+                    WHERE created_at >= $1 AND created_at <= $2
                     ORDER BY created_at DESC
-                    LIMIT $2 OFFSET $3
+                    LIMIT $3 OFFSET $4
                     """,
-                    date_str,
+                    start_ts,
+                    end_ts,
                     page_size,
                     offset,
                 )
 
                 logs = []
                 for row in rows:
-                    created_at_dt = datetime.fromtimestamp(row["created_at"], tz=timezone.utc).astimezone()
+                    created_at_dt = datetime.fromtimestamp(row["created_at"], tz=CHINA_TZ)
                     logs.append(
                         {
                             "id": row["id"],

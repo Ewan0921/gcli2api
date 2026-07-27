@@ -2959,112 +2959,130 @@ function renderUsageList() {
                     <span class="usage-info-value" style="font-size: 24px; font-weight: bold; color: #007bff;">${calls24h}</span>
                 </div>
             </div>
-            <div class="usage-actions">
-                <button class="usage-btn reset" onclick="resetSingleUsageStats('${filename}')">重置统计</button>
-            </div>
-        `;
+            <div class="usage-actfunction setTokenStatsDateQuick(type) {
+    const startInput = document.getElementById('tokenStatsStartDate') || document.getElementById('tokenStatsDate');
+    const endInput = document.getElementById('tokenStatsEndDate');
+    if (!startInput) return;
 
-        list.appendChild(card);
+    const today = new Date();
+    const formatDate = (d) => {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    };
+
+    let startDateStr = '';
+    let endDateStr = formatDate(today);
+
+    if (type === 'this_month') {
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        startDateStr = formatDate(firstDay);
+    } else if (type === 'last_month') {
+        const firstDayLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastDayLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+        startDateStr = formatDate(firstDayLastMonth);
+        endDateStr = formatDate(lastDayLastMonth);
+    } else if (type === 'today') {
+        startDateStr = formatDate(today);
+        endDateStr = formatDate(today);
+    } else if (type === 'last_7_days') {
+        const d7 = new Date(today.getTime() - 6 * 24 * 3600 * 1000);
+        startDateStr = formatDate(d7);
     }
+
+    startInput.value = startDateStr;
+    if (endInput) endInput.value = endDateStr;
+    loadTokenStats(1);
 }
 
-async function resetSingleUsageStats(filename) {
-    if (!confirm(`确定要重置 ${filename} 的使用统计吗？`)) return;
+async function loadTokenStats(page = 1) {
+    currentTokenStatsPage = page;
+    const startInput = document.getElementById('tokenStatsStartDate') || document.getElementById('tokenStatsDate');
+    const endInput = document.getElementById('tokenStatsEndDate');
+    if (!startInput) return;
+
+    const today = new Date();
+    const formatDate = (d) => {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    };
+
+    let startDate = startInput.value;
+    let endDate = endInput ? endInput.value : '';
+
+    if (!startDate) {
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        startDate = formatDate(firstDay);
+        startInput.value = startDate;
+    }
+    if (!endDate && endInput) {
+        endDate = formatDate(today);
+        endInput.value = endDate;
+    }
 
     try {
-        const response = await fetch('./usage/reset', {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ filename })
+        const url = endInput 
+            ? `/panel/api/stats/token_logs?start_date=${startDate}&end_date=${endDate}&page=${page}&page_size=50`
+            : `/panel/api/stats/token_logs?date=${startDate}&page=${page}&page_size=50`;
+
+        const response = await fetch(url, {
+            headers: getAuthHeaders()
         });
 
-        const data = await response.json();
-
-        if (response.ok && data.success) {
-            showStatus(data.message, 'success');
-            await refreshUsageStats();
-        } else {
-            showStatus(`重置失败: ${data.message || data.detail || data.error || '未知错误'}`, 'error');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
+
+        const data = await response.json();
+        renderTokenStats(data);
     } catch (error) {
-        showStatus(`网络错误: ${error.message}`, 'error');
+        console.error('获取 Token 统计数据失败:', error);
+        safeShowNotify('获取 Token 统计数据失败: ' + error.message, 'error');
     }
 }
 
-async function resetAllUsageStats() {
-    if (!confirm('确定要重置所有文件的使用统计吗？此操作不可恢复！')) return;
+function renderTokenStats(data) {
+    const summary = data.summary || {};
+    const setElemText = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = val;
+    };
 
-    try {
-        const response = await fetch('./usage/reset', {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({})
+    setElemText('statTotalRequests', Number(summary.total_requests || 0).toLocaleString());
+    setElemText('statInputTokens', Number(summary.input_tokens || 0).toLocaleString());
+    setElemText('statOutputTokens', Number(summary.output_tokens || 0).toLocaleString());
+    setElemText('statCachedTokens', Number(summary.cached_tokens || 0).toLocaleString());
+    setElemText('statUncachedTokens', Number(summary.uncached_tokens || 0).toLocaleString());
+    setElemText('statCacheHitRate', (summary.cache_hit_rate || 0).toFixed(2) + '%');
+
+    const tbody = document.getElementById('tokenStatsTbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    const logs = data.logs || [];
+
+    if (logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: #999; padding: 20px;">暂无该时间段的请求记录</td></tr>`;
+    } else {
+        logs.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="font-size: 12px; color: #555; text-align: center;">${item.created_at_str || ''}</td>
+                <td style="text-align: center;"><span style="font-weight: 500; color: #333;">${escapeHtml(item.email || '未记录')}</span></td>
+                <td style="text-align: center;"><span style="padding: 2px 6px; border-radius: 4px; font-size: 11px; color: white; background-color: ${item.mode === 'antigravity' ? '#17a2b8' : '#007bff'};">${escapeHtml(item.mode || '')}</span></td>
+                <td style="text-align: center;"><span style="font-family: monospace; font-size: 12px; color: #444;">${escapeHtml(item.model || '')}</span></td>
+                <td style="font-weight: bold; color: #212529; text-align: center;">${Number(item.input_tokens || 0).toLocaleString()}</td>
+                <td style="font-weight: bold; color: #28a745; text-align: center;">${Number(item.output_tokens || 0).toLocaleString()}</td>
+                <td style="color: #17a2b8; text-align: center;">${Number(item.cached_tokens || 0).toLocaleString()}</td>
+                <td style="color: #fd7e14; text-align: center;">${Number(item.uncached_tokens || 0).toLocaleString()}</td>
+                <td style="font-weight: bold; color: #007bff; text-align: center;">${Number(item.total_tokens || 0).toLocaleString()}</td>
+            `;
+            tbody.appendChild(tr);
         });
-
-        const data = await response.json();
-
-        if (response.ok && data.success) {
-            showStatus(data.message, 'success');
-            await refreshUsageStats();
-        } else {
-            showStatus(`重置失败: ${data.message || data.detail || data.error || '未知错误'}`, 'error');
-        }
-    } catch (error) {
-        showStatus(`网络错误: ${error.message}`, 'error');
-    }
-}
-
-// =====================================================================
-// 冷却倒计时自动更新
-// =====================================================================
-function startCooldownTimer() {
-    if (AppState.cooldownTimerInterval) {
-        clearInterval(AppState.cooldownTimerInterval);
-    }
-
-    AppState.cooldownTimerInterval = setInterval(() => {
-        updateCooldownDisplays();
-    }, 1000);
-}
-
-function stopCooldownTimer() {
-    if (AppState.cooldownTimerInterval) {
-        clearInterval(AppState.cooldownTimerInterval);
-        AppState.cooldownTimerInterval = null;
-    }
-}
-
-function updateCooldownDisplays() {
-    let needsRefresh = false;
-
-    // 检查模型级冷却是否过期
-    for (const credInfo of Object.values(AppState.creds.data)) {
-        if (credInfo.model_cooldowns && Object.keys(credInfo.model_cooldowns).length > 0) {
-            const currentTime = Date.now() / 1000;
-            const hasExpiredCooldowns = Object.entries(credInfo.model_cooldowns).some(([, until]) => until <= currentTime);
-
-            if (hasExpiredCooldowns) {
-                needsRefresh = true;
-                break;
-            }
-        }
-    }
-
-    if (needsRefresh) {
-        AppState.creds.renderList();
-        return;
-    }
-
-    // 更新模型级冷却的显示
-    document.querySelectorAll('.cooldown-badge').forEach(badge => {
-        const card = badge.closest('.cred-card');
-        const filenameEl = card?.querySelector('.cred-filename');
-        if (!filenameEl) return;
-
-        const filename = filenameEl.textContent;
-        const credInfo = Object.values(AppState.creds.data).find(c => c.filename === filename);
-
-        if (credInfo && credInfo.model_cooldowns) {
+    }ns) {
             const currentTime = Date.now() / 1000;
             const titleMatch = badge.getAttribute('title')?.match(/模型: (.+)/);
             if (titleMatch) {
@@ -3228,25 +3246,76 @@ function autoSetKeepaliveUrl() {
 // =====================================================================
 // Token 统计相关前端函数
 // =====================================================================
-let currentTokenStatsPage = 1;
+function setTokenStatsDateQuick(type) {
+    const startInput = document.getElementById('tokenStatsStartDate') || document.getElementById('tokenStatsDate');
+    const endInput = document.getElementById('tokenStatsEndDate');
+    if (!startInput) return;
+
+    const today = new Date();
+    const formatDate = (d) => {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    };
+
+    let startDateStr = '';
+    let endDateStr = formatDate(today);
+
+    if (type === 'this_month') {
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        startDateStr = formatDate(firstDay);
+    } else if (type === 'last_month') {
+        const firstDayLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastDayLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+        startDateStr = formatDate(firstDayLastMonth);
+        endDateStr = formatDate(lastDayLastMonth);
+    } else if (type === 'today') {
+        startDateStr = formatDate(today);
+        endDateStr = formatDate(today);
+    } else if (type === 'last_7_days') {
+        const d7 = new Date(today.getTime() - 6 * 24 * 3600 * 1000);
+        startDateStr = formatDate(d7);
+    }
+
+    startInput.value = startDateStr;
+    if (endInput) endInput.value = endDateStr;
+    loadTokenStats(1);
+}
 
 async function loadTokenStats(page = 1) {
     currentTokenStatsPage = page;
-    const dateInput = document.getElementById('tokenStatsDate');
-    if (!dateInput) return;
+    const startInput = document.getElementById('tokenStatsStartDate') || document.getElementById('tokenStatsDate');
+    const endInput = document.getElementById('tokenStatsEndDate');
+    if (!startInput) return;
 
-    let selectedDate = dateInput.value;
-    if (!selectedDate) {
-        const today = new Date();
-        const yyyy = today.getFullYear();
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const dd = String(today.getDate()).padStart(2, '0');
-        selectedDate = `${yyyy}-${mm}-${dd}`;
-        dateInput.value = selectedDate;
+    const today = new Date();
+    const formatDate = (d) => {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    };
+
+    let startDate = startInput.value;
+    let endDate = endInput ? endInput.value : '';
+
+    if (!startDate) {
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        startDate = formatDate(firstDay);
+        startInput.value = startDate;
+    }
+    if (!endDate && endInput) {
+        endDate = formatDate(today);
+        endInput.value = endDate;
     }
 
     try {
-        const response = await fetch(`/panel/api/stats/token_logs?date=${selectedDate}&page=${page}&page_size=50`, {
+        const url = endInput 
+            ? `/panel/api/stats/token_logs?start_date=${startDate}&end_date=${endDate}&page=${page}&page_size=50`
+            : `/panel/api/stats/token_logs?date=${startDate}&page=${page}&page_size=50`;
+
+        const response = await fetch(url, {
             headers: getAuthHeaders()
         });
 
@@ -3283,20 +3352,20 @@ function renderTokenStats(data) {
     const logs = data.logs || [];
 
     if (logs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: #999; padding: 20px;">暂无该日期的请求记录</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: #999; padding: 20px;">暂无该时间段的请求记录</td></tr>`;
     } else {
         logs.forEach(item => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td style="font-size: 12px; color: #555;">${item.created_at_str || ''}</td>
-                <td><span style="font-weight: 500; color: #333;">${escapeHtml(item.email || '未记录')}</span></td>
-                <td><span style="padding: 2px 6px; border-radius: 4px; font-size: 11px; color: white; background-color: ${item.mode === 'antigravity' ? '#17a2b8' : '#007bff'};">${escapeHtml(item.mode || '')}</span></td>
-                <td><span style="font-family: monospace; font-size: 12px; color: #444;">${escapeHtml(item.model || '')}</span></td>
-                <td style="font-weight: bold; color: #212529;">${Number(item.input_tokens || 0).toLocaleString()}</td>
-                <td style="font-weight: bold; color: #28a745;">${Number(item.output_tokens || 0).toLocaleString()}</td>
-                <td style="color: #17a2b8;">${Number(item.cached_tokens || 0).toLocaleString()}</td>
-                <td style="color: #fd7e14;">${Number(item.uncached_tokens || 0).toLocaleString()}</td>
-                <td style="font-weight: bold; color: #007bff;">${Number(item.total_tokens || 0).toLocaleString()}</td>
+                <td style="font-size: 12px; color: #555; text-align: center;">${item.created_at_str || ''}</td>
+                <td style="text-align: center;"><span style="font-weight: 500; color: #333;">${escapeHtml(item.email || '未记录')}</span></td>
+                <td style="text-align: center;"><span style="padding: 2px 6px; border-radius: 4px; font-size: 11px; color: white; background-color: ${item.mode === 'antigravity' ? '#17a2b8' : '#007bff'};">${escapeHtml(item.mode || '')}</span></td>
+                <td style="text-align: center;"><span style="font-family: monospace; font-size: 12px; color: #444;">${escapeHtml(item.model || '')}</span></td>
+                <td style="font-weight: bold; color: #212529; text-align: center;">${Number(item.input_tokens || 0).toLocaleString()}</td>
+                <td style="font-weight: bold; color: #28a745; text-align: center;">${Number(item.output_tokens || 0).toLocaleString()}</td>
+                <td style="color: #17a2b8; text-align: center;">${Number(item.cached_tokens || 0).toLocaleString()}</td>
+                <td style="color: #fd7e14; text-align: center;">${Number(item.uncached_tokens || 0).toLocaleString()}</td>
+                <td style="font-weight: bold; color: #007bff; text-align: center;">${Number(item.total_tokens || 0).toLocaleString()}</td>
             `;
             tbody.appendChild(tr);
         });

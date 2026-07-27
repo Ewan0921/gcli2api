@@ -2063,12 +2063,19 @@
                 <div class="card">
                     <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
                         <h3 style="margin: 0; color: #fff; font-size: 16px;">📊 Token 消耗与请求日志</h3>
-                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                            <label for="tokenStatsDate" style="font-size: 13px; font-weight: 500; color: #aaa;">选择日期：</label>
-                            <input type="date" id="tokenStatsDate" style="padding: 5px 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #fff; font-size: 13px;" onchange="loadTokenStats(1)" />
-                            <button class="btn" style="width: auto; padding: 6px 14px; margin: 0; font-size: 13px;" onclick="loadTokenStats(1)">🔍 查询</button>
-                            <button class="btn" style="width: auto; padding: 6px 12px; margin: 0; font-size: 12px; background: #dc3545; border-color: #dc3545;" onclick="clearTokenLogs('day')">🗑️ 清空当日</button>
-                            <button class="btn" style="width: auto; padding: 6px 12px; margin: 0; font-size: 12px; background: #6c757d; border-color: #6c757d;" onclick="clearTokenLogs('all')">⚠️ 清空全部</button>
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <label style="font-size: 13px; font-weight: 500; color: #aaa;">日期范围：</label>
+                            <input type="date" id="tokenStatsStartDate" style="padding: 5px 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #fff; font-size: 12px;" onchange="loadTokenStats(1)" />
+                            <span style="color: #888; font-size: 12px;">至</span>
+                            <input type="date" id="tokenStatsEndDate" style="padding: 5px 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #fff; font-size: 12px;" onchange="loadTokenStats(1)" />
+                            <button class="btn" style="width: auto; padding: 5px 10px; margin: 0; font-size: 12px;" onclick="loadTokenStats(1)">🔍 查询</button>
+
+                            <button class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 11px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);" onclick="setTokenStatsDateQuick('this_month')">📅 本月</button>
+                            <button class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 11px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);" onclick="setTokenStatsDateQuick('last_month')">📆 上月</button>
+                            <button class="btn" style="width: auto; padding: 4px 8px; margin: 0; font-size: 11px; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2);" onclick="setTokenStatsDateQuick('today')">☀️ 今天</button>
+
+                            <button class="btn" style="width: auto; padding: 5px 8px; margin: 0; font-size: 11px; background: #dc3545; border-color: #dc3545;" onclick="clearTokenLogs('day')">🗑️ 清空范围</button>
+                            <button class="btn" style="width: auto; padding: 5px 8px; margin: 0; font-size: 11px; background: #6c757d; border-color: #6c757d;" onclick="clearTokenLogs('all')">⚠️ 清空全部</button>
                         </div>
                     </div>
 
@@ -2083,16 +2090,16 @@
                     <div style="overflow-x: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                             <thead>
-                                <tr style="background-color: #f1f3f5; text-align: left;">
-                                    <th style="padding: 8px;">时间</th>
-                                    <th style="padding: 8px;">账号邮箱</th>
-                                    <th style="padding: 8px;">模式</th>
-                                    <th style="padding: 8px;">模型</th>
-                                    <th style="padding: 8px;">输入</th>
-                                    <th style="padding: 8px;">输出</th>
-                                    <th style="padding: 8px;">命中</th>
-                                    <th style="padding: 8px;">未命中</th>
-                                    <th style="padding: 8px;">总数</th>
+                                <tr style="background-color: #f1f3f5; text-align: center;">
+                                    <th style="padding: 8px; text-align: center;">时间</th>
+                                    <th style="padding: 8px; text-align: center;">账号邮箱</th>
+                                    <th style="padding: 8px; text-align: center;">模式</th>
+                                    <th style="padding: 8px; text-align: center;">模型</th>
+                                    <th style="padding: 8px; text-align: center;">输入</th>
+                                    <th style="padding: 8px; text-align: center;">输出</th>
+                                    <th style="padding: 8px; text-align: center;">命中</th>
+                                    <th style="padding: 8px; text-align: center;">未命中</th>
+                                    <th style="padding: 8px; text-align: center;">总数</th>
                                 </tr>
                             </thead>
                             <tbody id="tokenStatsTbody">

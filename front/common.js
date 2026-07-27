@@ -3014,6 +3014,26 @@ async function resetAllUsageStats() {
     }
 }
 
+// =====================================================================
+// 冷却倒计时自动更新
+// =====================================================================
+function startCooldownTimer() {
+    if (AppState.cooldownTimerInterval) {
+        clearInterval(AppState.cooldownTimerInterval);
+    }
+
+    AppState.cooldownTimerInterval = setInterval(() => {
+        updateCooldownDisplays();
+    }, 1000);
+}
+
+function stopCooldownTimer() {
+    if (AppState.cooldownTimerInterval) {
+        clearInterval(AppState.cooldownTimerInterval);
+        AppState.cooldownTimerInterval = null;
+    }
+}
+
 function updateCooldownDisplays() {
     let needsRefresh = false;
 

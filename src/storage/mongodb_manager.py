@@ -1689,13 +1689,29 @@ class MongoDBManager:
                 "logs": [],
             }
 
-    async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
-        """清空指定日期或全部请求日志"""
+    async def clear_request_logs(
+        self,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: Optional[str] = None,
+    ) -> bool:
+        """清空指定日期、指定范围或全部请求日志"""
         self._ensure_initialized()
+        if date_str == "all":
+            start_date_str = ""
+            end_date_str = ""
+        elif date_str:
+            if not start_date_str:
+                start_date_str = date_str
+            if not end_date_str:
+                end_date_str = date_str
+
         try:
             collection = self._db["request_logs"]
-            if date_str and date_str != "all":
-                await collection.delete_many({"date_str": date_str})
+            if start_date_str and end_date_str:
+                start_ts, _ = get_timezone_timestamp_range(start_date_str)
+                _, end_ts = get_timezone_timestamp_range(end_date_str)
+                await collection.delete_many({"created_at": {"$gte": start_ts, "$lte": end_ts}})
             else:
                 await collection.delete_many({})
             return True

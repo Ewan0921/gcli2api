@@ -74,15 +74,35 @@ async def get_token_logs(
 
 @router.delete("/token_logs")
 async def clear_token_logs(
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     date: Optional[str] = Query(None, description="指定清除的日期，格式 YYYY-MM-DD 或 all（全部）"),
     token: str = Depends(verify_panel_token),
 ):
-    """清除指定日期或全量的请求日志脏数据"""
+    """清除指定日期、日期范围或全量的请求日志脏数据"""
     try:
+        if date == "all":
+            start_date_str = ""
+            end_date_str = ""
+        elif date:
+            start_date_str = date
+            end_date_str = date
+        else:
+            start_date_str = start_date or ""
+            end_date_str = end_date or ""
+
         adapter = await get_storage_adapter()
-        success = await adapter.clear_request_logs(date_str=date)
+        success = await adapter.clear_request_logs(
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
+        )
         if success:
-            msg = f"已成功清除 {date} 的请求日志" if date and date != "all" else "已成功清空所有请求日志历史脏数据"
+            if date == "all" or (not start_date_str and not end_date_str):
+                msg = "已成功清空所有请求日志历史数据"
+            elif start_date_str == end_date_str:
+                msg = f"已成功清除 {start_date_str} 当天的请求日志"
+            else:
+                msg = f"已成功清除 {start_date_str} 至 {end_date_str} 范围内的请求日志"
             return JSONResponse(content={"success": True, "message": msg})
         else:
             return JSONResponse(status_code=500, content={"success": False, "error": "清除失败"})

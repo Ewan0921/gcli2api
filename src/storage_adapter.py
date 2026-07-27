@@ -97,8 +97,13 @@ class StorageBackend(Protocol):
         """获取指定日期范围的请求日志及统计信息"""
         ...
 
-    async def clear_request_logs(self, date_str: Optional[str] = None) -> bool:
-        """删除指定日期或全部请求日志"""
+    async def clear_request_logs(
+        self,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: Optional[str] = None,
+    ) -> bool:
+        """删除指定日期范围或全部请求日志"""
         ...
 
 
@@ -291,6 +296,27 @@ class StorageAdapter:
             end_date_str=end_date_str,
             page=page,
             page_size=page_size,
+        )
+
+    async def clear_request_logs(
+        self,
+        start_date_str: str = "",
+        end_date_str: str = "",
+        date_str: Optional[str] = None,
+    ) -> bool:
+        """删除指定日期范围或全部请求日志"""
+        self._ensure_initialized()
+        if date_str == "all":
+            start_date_str = ""
+            end_date_str = ""
+        elif date_str:
+            if not start_date_str:
+                start_date_str = date_str
+            if not end_date_str:
+                end_date_str = date_str
+        return await self._backend.clear_request_logs(
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
         )
 
     # ============ 工具方法 ============

@@ -3377,22 +3377,29 @@ function safeShowNotify(msg, type = 'info') {
 }
 
 async function clearTokenLogs(target = 'day') {
-    const dateInput = document.getElementById('tokenStatsDate');
-    const selectedDate = dateInput ? dateInput.value : '';
+    const startInput = document.getElementById('tokenStatsStartDate') || document.getElementById('tokenStatsDate');
+    const endInput = document.getElementById('tokenStatsEndDate');
+    const startDate = startInput ? startInput.value : '';
+    const endDate = endInput ? endInput.value : '';
 
     let confirmMsg = '';
-    let queryDate = '';
+    let deleteUrl = '';
 
     if (target === 'day') {
-        if (!selectedDate) {
-            safeShowNotify('请先选择需要清空的日期', 'error');
+        if (!startDate) {
+            safeShowNotify('请先选择需要清空的开始日期', 'error');
             return;
         }
-        confirmMsg = `确定要清空 ${selectedDate} 当天的所有请求 Token 日志脏数据吗？`;
-        queryDate = selectedDate;
+        if (endDate && startDate !== endDate) {
+            confirmMsg = `确定要清空 ${startDate} 至 ${endDate} 日期范围内的所有请求 Token 日志数据吗？`;
+            deleteUrl = `/panel/api/stats/token_logs?start_date=${startDate}&end_date=${endDate}`;
+        } else {
+            confirmMsg = `确定要清空 ${startDate} 当天的所有请求 Token 日志数据吗？`;
+            deleteUrl = `/panel/api/stats/token_logs?start_date=${startDate}&end_date=${startDate}`;
+        }
     } else {
         confirmMsg = '⚠️ 警告：确定要彻底清空历史上的【全部】请求 Token 日志数据吗？此操作不可恢复！';
-        queryDate = 'all';
+        deleteUrl = `/panel/api/stats/token_logs?date=all`;
     }
 
     if (!confirm(confirmMsg)) {
@@ -3400,7 +3407,7 @@ async function clearTokenLogs(target = 'day') {
     }
 
     try {
-        const response = await fetch(`/panel/api/stats/token_logs?date=${queryDate}`, {
+        const response = await fetch(deleteUrl, {
             method: 'DELETE',
             headers: getAuthHeaders()
         });
@@ -3410,10 +3417,10 @@ async function clearTokenLogs(target = 'day') {
             safeShowNotify(data.message || '数据清除成功', 'success');
             loadTokenStats(1);
         } else {
-            safeShowNotify('数据清除失败: ' + (data.error || '未知错误'), 'error');
+            safeShowNotify(data.error || data.detail || '清除数据失败', 'error');
         }
     } catch (error) {
-        console.error('清除 Token 统计数据失败:', error);
-        safeShowNotify('清除 Token 统计数据失败: ' + error.message, 'error');
+        console.error('清除日志请求失败:', error);
+        safeShowNotify('网络错误，清空数据失败', 'error');
     }
 }

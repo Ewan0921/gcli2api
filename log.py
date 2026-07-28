@@ -5,7 +5,10 @@
 import os
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# 中国标准时间 (UTC+8)
+CHINA_TZ = timezone(timedelta(hours=8))
 from collections import deque
 import atexit
 
@@ -240,7 +243,7 @@ def _log(level: str, message: str):
     if level_val < _cached_log_level:
         return
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(tz=CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S")
     entry = f"[{timestamp}] [{level.upper()}] {message}"
 
     if level in ("error", "critical"):

@@ -74,8 +74,9 @@ async def download_logs(token: str = Depends(verify_panel_token)):
         if file_size == 0:
             raise HTTPException(status_code=404, detail="日志文件为空")
 
-        # 生成文件名（包含时间戳）
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # 生成文件名（包含时间戳，使用北京时间）
+        from src.utils import CHINA_TZ
+        timestamp = datetime.datetime.now(tz=CHINA_TZ).strftime("%Y%m%d_%H%M%S")
         filename = f"gcli2api_logs_{timestamp}.txt"
 
         log.info(f"下载日志文件: {log_file_path}")

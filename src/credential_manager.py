@@ -124,6 +124,16 @@ class CredentialManager:
                 log.debug(f"[STICKY] 绑定凭证已禁用: {filename}")
                 return None
 
+            # 检查指定模型是否在冷却中
+            if model_name:
+                model_cooldowns = credential_data.get("model_cooldowns", {})
+                cooldown_until = model_cooldowns.get(model_name, 0)
+                current_time = time.time()
+                if cooldown_until > current_time:
+                    remaining = int(cooldown_until - current_time)
+                    log.info(f"[STICKY] ⚠️ 绑定凭证 {filename} 的模型 {model_name} 仍在冷却中 (剩余 {remaining}s)，触发故障转移")
+                    return None
+
             # Token 刷新检查
             if await self._should_refresh_token(credential_data):
                 refreshed_data = await self._refresh_token(credential_data, filename, mode=mode)

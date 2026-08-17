@@ -7,7 +7,10 @@ import asyncio
 import copy
 import hashlib
 import json
+import os
+import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from pathlib import Path
@@ -129,7 +132,6 @@ def _extract_first_user_text(request_payload: Dict[str, Any]) -> str:
     return ""
 
 
-<<<<<<< HEAD
 def _session_key(request_payload: Dict[str, Any], model: str = "") -> str:
     session_id = request_payload.get("sessionId")
     if session_id:
@@ -328,7 +330,6 @@ async def wrap_cli_request(
     返回 (payload, request_id)。
     """
     inner = copy.deepcopy(gemini_request)
-    first_user_text = _extract_first_user_text(inner)
 
     # 移除 safetySettings（CLI 不发送）
     inner.pop("safetySettings", None)
@@ -340,28 +341,23 @@ async def wrap_cli_request(
     if bound_filename and state.bound_credential_file != bound_filename:
         state.bound_credential_file = bound_filename
         await _save_session_state(session_key, state)
+
     # 注入 sessionId
-    session_id = str(inner.get("sessionId") or "").strip()
-    if not session_id:
-        if first_user_text:
-            digest = hashlib.sha256(first_user_text.encode("utf-8")).digest()
-            session_id_val = int.from_bytes(digest[:8], "big") & 0x7FFFFFFFFFFFFFFF
-            session_id = f"-{session_id_val}"
-        else:
-            session_id = f"-{uuid.uuid4().int % 9_000_000_000_000_000_000}"
-        inner["sessionId"] = session_id
+    if not inner.get("sessionId"):
+        inner["sessionId"] = state.session_id
 
     # 注入 labels
-    inner["labels"] = _build_labels(model, session_id, 1)
+    inner["labels"] = _build_labels(model, state.trajectory_id, state.step_index)
 
     # toolConfig 默认 VALIDATED
     tool_config = inner.get("toolConfig") or {}
     func_config = tool_config.get("functionCallingConfig") or {}
-    func_config["mode"] = "VALIDATED"
+    if "mode" not in func_config:
+        func_config["mode"] = "VALIDATED"
     tool_config["functionCallingConfig"] = func_config
     inner["toolConfig"] = tool_config
 
-    request_id = _generate_request_id()
+    request_id = _generate_request_id(state.conversation_id, state.trajectory_id, state.step_index)
 
     payload = {
         "project": project_id,

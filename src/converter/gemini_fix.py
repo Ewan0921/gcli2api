@@ -89,7 +89,7 @@ def get_thinking_settings(model_name: str) -> tuple[Optional[int], Optional[str]
     # ========== 新 CLI 模式: 基于思考预算/等级 ==========
 
     # Gemini 3 Preview 系列: 使用 thinkingLevel
-    if "gemini-3" in base_model or "gemini-3.5" in base_model or "gemini-3.6" in base_model:
+    if "gemini-3" in base_model:
         if "-high" in model_name:
             return None, "high"
         elif "-medium" in model_name:
@@ -145,86 +145,6 @@ def is_thinking_model(model_name: str) -> bool:
     return "think" in model_name or "pro" in model_name.lower()
 
 
-<<<<<<< HEAD
-def map_antigravity_gemini_model(model_name: str, thinking_level: Optional[str], thinking_budget: Optional[int]) -> str:
-    """
-    将客户端请求的 Gemini 模型和思考参数，映射到 Antigravity 后端支持的精确模型 ID。
-    """
-    model_lower = model_name.lower()
-    
-    # 1. 后端支持的精确模型 ID 列表
-    exact_models = {
-        "gemini-3-flash", "gemini-3-flash-agent",
-        "gemini-3.1-pro-low", "gemini-pro-agent",
-        "gemini-3.1-flash-lite", "gemini-3.1-flash-image",
-        "gemini-3.5-flash-low", "gemini-3.5-flash-extra-low", "gemini-3.5-flash-high",
-        "gemini-3.6-flash-high", "gemini-3.6-flash-low", "gemini-3.6-flash-extra-low",
-        "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-thinking",
-        "tab_flash_lite_preview", "tab_jump_flash_lite_preview", "gpt-oss-120b-medium",
-        "chat_20706", "chat_23310"
-    }
-    
-    base_model = get_base_model_name(model_lower)
-    
-    # 已经是一个精确的后端模型 ID 则直接返回
-    if base_model in exact_models:
-        return base_model
-        
-    # 2. 根据请求的模型名后缀直接映射
-    if "gemini-3.1-pro" in base_model:
-        if "-high" in model_lower:
-            # gemini-3.1-pro-high is deprecated on the backend, mapped to gemini-pro-agent
-            return "gemini-pro-agent"
-        elif "-low" in model_lower:
-            return "gemini-3.1-pro-low"
-            
-    if "gemini-3.5-flash" in base_model:
-        if "-extra-low" in model_lower or "-minimal" in model_lower:
-            return "gemini-3.5-flash-extra-low"
-        elif "-low" in model_lower:
-            return "gemini-3.5-flash-low"
-        elif "-high" in model_lower:
-            return "gemini-3.5-flash-high"
-
-    if "gemini-3.6-flash" in base_model:
-        if "-extra-low" in model_lower or "-minimal" in model_lower:
-            return "gemini-3.6-flash-extra-low"
-        elif "-low" in model_lower:
-            return "gemini-3.6-flash-low"
-        elif "-high" in model_lower:
-            return "gemini-3.6-flash-high"
-            
-    if "gemini-3-flash" in base_model:
-        return "gemini-3-flash-agent"
-        
-    # 3. 如果请求的是基础名，根据传入的 thinkingLevel 参数进行映射
-    if "gemini-3.1-pro" in base_model:
-        if thinking_level and thinking_level.upper() == "HIGH":
-            return "gemini-pro-agent"
-        else:
-            return "gemini-3.1-pro-low"
-            
-    if "gemini-3.5-flash" in base_model:
-        if thinking_level and thinking_level.upper() in ("MINIMAL", "EXTRA-LOW"):
-            return "gemini-3.5-flash-extra-low"
-        elif thinking_level and thinking_level.upper() == "HIGH":
-            return "gemini-3.5-flash-high"
-        else:
-            return "gemini-3.5-flash-low"
-
-    if "gemini-3.6-flash" in base_model:
-        if thinking_level and thinking_level.upper() in ("MINIMAL", "EXTRA-LOW"):
-            return "gemini-3.6-flash-extra-low"
-        elif thinking_level and thinking_level.upper() == "HIGH":
-            return "gemini-3.6-flash-high"
-        else:
-            return "gemini-3.6-flash-low"
-
-    return base_model
-
-
-=======
->>>>>>> upstream/master
 async def normalize_gemini_request(
     request: Dict[str, Any],
     mode: str = "geminicli"
@@ -295,39 +215,10 @@ async def normalize_gemini_request(
             else:
                 include_thoughts = return_thoughts
         else:
-            # 3. 思考模型处理
-            thinking_budget, thinking_level = get_thinking_settings(model)
-
-            # 其次使用传入的思考预算/等级
-            if thinking_budget is None and thinking_level is None:
-                thinking_budget = generation_config.get("thinkingConfig", {}).get("thinkingBudget")
-                thinking_level = generation_config.get("thinkingConfig", {}).get("thinkingLevel")
-
-            # 针对 Gemini 模型：根据思考设置映射至真实的 Antigravity 后端模型 ID
-            if "gemini" in model.lower():
-                mapped_model = map_antigravity_gemini_model(model, thinking_level, thinking_budget)
-                log.info(f"[ANTIGRAVITY] Mapped Gemini model: {model} -> {mapped_model}")
-                model = mapped_model
-                result["model"] = model
-                
-                # 既然 Antigravity 后端是通过模型名（如 -high/-low）来确定思考深度的，
-                # 对于 Gemini 3/3.5/3.6 模型必须移除 thinkingLevel 配置以防止 API 返回参数冲突错误。
-                if "gemini-3" in model or "gemini-3.5" in model or "gemini-3.6" in model:
-                    generation_config.pop("thinkingConfig", None)
-                else:
-                    # 对于 Gemini 2.5 系列，保留 thinkingConfig
-                    if is_thinking_model(model) or thinking_budget is not None:
-                        if "thinkingConfig" not in generation_config:
-                            generation_config["thinkingConfig"] = {}
-                        thinking_config = generation_config["thinkingConfig"]
-                        if thinking_budget is not None:
-                            thinking_config["thinkingBudget"] = thinking_budget
-                            thinking_config.pop("thinkingLevel", None)
-                        thinking_config["includeThoughts"] = return_thoughts
-            elif thinking_budget is None or thinking_budget == 0:
+            # 非 pro 模型: 有思考预算或等级才包含思考
+            # 注意: 思考预算为 0 时不包含思考
+            if thinking_budget is None or thinking_budget == 0:
                 include_thoughts = False
-            else:
-                include_thoughts = return_thoughts
             else:
                 include_thoughts = return_thoughts
 

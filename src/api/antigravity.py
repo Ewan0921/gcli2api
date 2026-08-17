@@ -4,12 +4,10 @@ Antigravity API Client - Handles communication with Google's Antigravity API
 """
 
 import asyncio
+import copy
 import hashlib
 import json
-import os
-import time
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from pathlib import Path
@@ -90,8 +88,6 @@ async def _get_redis():
     except Exception as e:
         log.warning(f"[SESSION] Redis unavailable, falling back to in-memory: {e}")
     return _redis_client
-
-
 def _extract_first_user_text(request_payload: Dict[str, Any]) -> str:
     """
     提取会话 Key 的文本来源。
@@ -133,6 +129,7 @@ def _extract_first_user_text(request_payload: Dict[str, Any]) -> str:
     return ""
 
 
+<<<<<<< HEAD
 def _session_key(request_payload: Dict[str, Any], model: str = "") -> str:
     session_id = request_payload.get("sessionId")
     if session_id:
@@ -291,17 +288,47 @@ def _build_labels(model: str, trajectory_id: str, step: int) -> Dict[str, str]:
     }
 
 
+def _should_forward_antigravity_header(header_name: str) -> bool:
+    normalized = header_name.strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith("x-b3-"):
+        return True
+    return normalized in {
+        "accept-language",
+        "traceparent",
+        "tracestate",
+        "x-cloud-trace-context",
+        "x-goog-api-client",
+        "x-goog-request-params",
+        "x-goog-user-project",
+        "x-request-id",
+    }
+
+
+def _sanitize_antigravity_headers(extra_headers: Optional[Dict[str, str]]) -> Dict[str, str]:
+    if not extra_headers:
+        return {}
+    sanitized: Dict[str, str] = {}
+    for key, value in extra_headers.items():
+        if _should_forward_antigravity_header(key):
+            sanitized[key] = value
+    return sanitized
+
+
 async def wrap_cli_request(
     gemini_request: Dict[str, Any],
     model: str,
     project_id: str,
     bound_filename: Optional[str] = None,
+    enable_credit: bool = False,
 ) -> Tuple[Dict[str, Any], str]:
     """
     将 Gemini 格式请求包装成 Antigravity CLI 格式。
     返回 (payload, request_id)。
     """
-    inner = dict(gemini_request)
+    inner = copy.deepcopy(gemini_request)
+    first_user_text = _extract_first_user_text(inner)
 
     # 移除 safetySettings（CLI 不发送）
     inner.pop("safetySettings", None)
@@ -313,23 +340,28 @@ async def wrap_cli_request(
     if bound_filename and state.bound_credential_file != bound_filename:
         state.bound_credential_file = bound_filename
         await _save_session_state(session_key, state)
-
     # 注入 sessionId
-    if not inner.get("sessionId"):
-        inner["sessionId"] = state.session_id
+    session_id = str(inner.get("sessionId") or "").strip()
+    if not session_id:
+        if first_user_text:
+            digest = hashlib.sha256(first_user_text.encode("utf-8")).digest()
+            session_id_val = int.from_bytes(digest[:8], "big") & 0x7FFFFFFFFFFFFFFF
+            session_id = f"-{session_id_val}"
+        else:
+            session_id = f"-{uuid.uuid4().int % 9_000_000_000_000_000_000}"
+        inner["sessionId"] = session_id
 
     # 注入 labels
-    inner["labels"] = _build_labels(model, state.trajectory_id, state.step_index)
+    inner["labels"] = _build_labels(model, session_id, 1)
 
     # toolConfig 默认 VALIDATED
     tool_config = inner.get("toolConfig") or {}
     func_config = tool_config.get("functionCallingConfig") or {}
-    if "mode" not in func_config:
-        func_config["mode"] = "VALIDATED"
+    func_config["mode"] = "VALIDATED"
     tool_config["functionCallingConfig"] = func_config
     inner["toolConfig"] = tool_config
 
-    request_id = _generate_request_id(state.conversation_id, state.trajectory_id, state.step_index)
+    request_id = _generate_request_id()
 
     payload = {
         "project": project_id,
@@ -338,21 +370,41 @@ async def wrap_cli_request(
         "model": model,
         "userAgent": "antigravity",
         "requestType": "agent",
-        "enabledCreditTypes": ["GOOGLE_ONE_AI"],
     }
+    if enable_credit:
+        payload["enabledCreditTypes"] = ["GOOGLE_ONE_AI"]
     return payload, request_id
 
 
 # ==================== 辅助函数 ====================
 
-def build_antigravity_headers(access_token: str) -> Dict[str, str]:
+def build_antigravity_headers(
+    access_token: str,
+    extra_headers: Optional[Dict[str, str]] = None,
+    model_name: str = "",
+) -> Dict[str, str]:
     """构建 Antigravity CLI API 请求头。"""
-    return {
+    headers = {
         "User-Agent": ANTIGRAVITY_USER_AGENT,
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
+        "Accept": "*/*",
         "Accept-Encoding": "gzip",
+        "Connection": "close",
+        "requestId": f"req-{uuid.uuid4()}",
     }
+
+    for key, value in _sanitize_antigravity_headers(extra_headers).items():
+        headers.setdefault(key, value)
+
+    # 根据模型名称判断 request_type
+    if model_name:
+        if "image" in model_name.lower():
+            headers["requestType"] = "image_gen"
+        else:
+            headers["requestType"] = "agent"
+
+    return headers
 
 
 def _is_retryable_status(status_code: int, disable_error_codes: List[int]) -> bool:
@@ -429,6 +481,7 @@ async def stream_request(
     current_file, credential_data = cred_result
     access_token = credential_data.get("access_token") or credential_data.get("token")
     project_id = credential_data.get("project_id", "")
+    enable_credit = bool(credential_data.get("enable_credit", False))
 
     if not access_token:
         log.error(f"[ANTIGRAVITY STREAM] No access token in credential: {current_file}")
@@ -443,15 +496,11 @@ async def stream_request(
     antigravity_url = await get_antigravity_api_url()
     target_url = f"{antigravity_url}/v1internal:streamGenerateContent?alt=sse"
 
-    auth_headers = build_antigravity_headers(access_token)
-
-    # 合并自定义headers
-    if headers:
-        auth_headers.update(headers)
+    auth_headers = build_antigravity_headers(access_token, headers, model_name)
 
     # 构建 CLI 格式请求体
     inner_request = body.get("request", body)
-    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id, bound_filename=current_file)
+    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id, bound_filename=current_file, enable_credit=enable_credit)
 
     # 3. 调用stream_post_async进行请求
     retry_config = await get_retry_config()
@@ -739,6 +788,7 @@ async def non_stream_request(
     current_file, credential_data = cred_result
     access_token = credential_data.get("access_token") or credential_data.get("token")
     project_id = credential_data.get("project_id", "")
+    enable_credit = bool(credential_data.get("enable_credit", False))
 
     if not access_token:
         log.error(f"[ANTIGRAVITY] No access token in credential: {current_file}")
@@ -752,14 +802,10 @@ async def non_stream_request(
     antigravity_url = await get_antigravity_api_url()
     target_url = f"{antigravity_url}/v1internal:generateContent"
 
-    auth_headers = build_antigravity_headers(access_token)
-
-    # 合并自定义headers
-    if headers:
-        auth_headers.update(headers)
+    auth_headers = build_antigravity_headers(access_token, headers, model_name)
 
     # 构建 CLI 格式请求体
-    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id, bound_filename=current_file)
+    final_payload, _ = await wrap_cli_request(inner_request, model_name, project_id, bound_filename=current_file, enable_credit=enable_credit)
 
     # 3. 调用post_async进行请求
     retry_config = await get_retry_config()
@@ -806,8 +852,7 @@ async def non_stream_request(
             response = await post_async(
                 url=target_url,
                 json=final_payload,
-                headers=auth_headers,
-                timeout=300.0
+                headers=auth_headers
             )
 
             status_code = response.status_code
@@ -1000,7 +1045,7 @@ async def fetch_available_models() -> List[Dict[str, Any]]:
         return []
 
     # 构建请求头
-    headers = build_antigravity_headers(access_token)
+    headers = build_antigravity_headers(access_token, model_name="agent")
 
     try:
         # 使用 POST 请求获取模型列表
@@ -1084,7 +1129,7 @@ async def fetch_quota_info(access_token: str) -> Dict[str, Any]:
         }
     """
 
-    headers = build_antigravity_headers(access_token)
+    headers = build_antigravity_headers(access_token, model_name="agent")
 
     try:
         antigravity_url = await get_antigravity_api_url()

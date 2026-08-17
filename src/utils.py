@@ -25,7 +25,7 @@ def get_geminicli_user_agent(model: str = "") -> str:
 GEMINICLI_USER_AGENT = get_geminicli_user_agent()
 
 # Antigravity CLI 客户端仿真常量
-ANTIGRAVITY_CLI_VERSION = "1.0.1"
+ANTIGRAVITY_CLI_VERSION = "1.1.12"
 ANTIGRAVITY_CLI_PLATFORM = "windows/amd64"
 ANTIGRAVITY_USER_AGENT = f"antigravity/cli/{ANTIGRAVITY_CLI_VERSION} {ANTIGRAVITY_CLI_PLATFORM}"
 
@@ -62,6 +62,7 @@ BASE_MODELS = [
     "gemini-3-flash-preview",
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
 ]
 
 

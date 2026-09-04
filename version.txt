@@ -1,4 +1,4 @@
-full_hash=74e239ca2b0111c0a14571b2531271baa03029f4
-short_hash=74e239c
-message=Update antigravity.py
-date=2026-08-14 11:38:53 +0800
+full_hash=1a506b1e0b3fa3b5d21512f57d7cdcd77700547d
+short_hash=1a506b1
+message=更新agycli版本
+date=2026-09-03 11:00:45 +0800

@@ -1435,6 +1435,23 @@ async def convert_openai_to_gemini_request(openai_request: Dict[str, Any]) -> Di
             for part in content:
                 if part.get("type") == "text":
                     parts.append({"text": part.get("text", "")})
+                elif part.get("type") == "tool_result":
+                    # 兼容 Claude 格式在 user 消息中传递的 tool_result
+                    tool_content = part.get("content", "")
+                    if isinstance(tool_content, list):
+                        pieces = []
+                        for p in tool_content:
+                            if isinstance(p, dict) and "text" in p:
+                                pieces.append(p["text"])
+                            elif isinstance(p, str):
+                                pieces.append(p)
+                        text_val = "\n".join(pieces)
+                    elif isinstance(tool_content, dict):
+                        text_val = tool_content.get("text", str(tool_content))
+                    else:
+                        text_val = str(tool_content)
+                    tool_id = part.get("tool_use_id", "")
+                    parts.append({"text": f"[Tool Result {tool_id}]:\n{text_val}" if tool_id else text_val})
                 elif part.get("type") == "image_url":
                     image_url = part.get("image_url", {}).get("url")
                     if image_url:

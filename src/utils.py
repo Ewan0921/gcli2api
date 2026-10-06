@@ -10,22 +10,17 @@ security = HTTPBearer()
 
 # ====================== OAuth Configuration ======================
 
-_GEMINICLI_VERSION = "0.55.1"
-_GEMINICLI_PLATFORM = "win32"
-_GEMINICLI_ARCH = "x64"
-_GEMINICLI_SURFACE = "cloud-shell"
-
 def get_geminicli_user_agent(model: str = "") -> str:
     """生成动态 User-Agent: GeminiCLI/{version}/{model} ({platform}; {arch}; {surface})"""
     if model:
-        return f"GeminiCLI/{_GEMINICLI_VERSION}/{model} ({_GEMINICLI_PLATFORM}; {_GEMINICLI_ARCH}; {_GEMINICLI_SURFACE})"
-    return f"GeminiCLI/{_GEMINICLI_VERSION} ({_GEMINICLI_PLATFORM}; {_GEMINICLI_ARCH}; {_GEMINICLI_SURFACE})"
+         return f"Mozilla/5.0 (compatible; Google-Gemini-CLI/1.0; +https://github.com/google-gemini/gemini-cli) {model}"
+    return f"Mozilla/5.0 (compatible; Google-Gemini-CLI/1.0; +https://github.com/google-gemini/gemini-cli)"
 
 # 静态常量
 GEMINICLI_USER_AGENT = get_geminicli_user_agent()
 
 # Antigravity CLI 客户端仿真常量
-ANTIGRAVITY_CLI_VERSION = "1.1.24"
+ANTIGRAVITY_CLI_VERSION = "1.2.12"
 ANTIGRAVITY_CLI_PLATFORM = "windows/amd64"
 ANTIGRAVITY_USER_AGENT = f"antigravity/cli/{ANTIGRAVITY_CLI_VERSION} {ANTIGRAVITY_CLI_PLATFORM}"
 

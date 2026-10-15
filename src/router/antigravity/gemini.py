@@ -30,6 +30,7 @@ from src.utils import (
     authenticate_gemini_flexible,
     is_fake_streaming_model,
     apply_custom_model_mapping,
+    apply_thinking_level_model_suffix,
 )
 
 # 本地模块 - 转换器（假流式需要）
@@ -85,6 +86,9 @@ async def generate_content(
     if is_health_check_request(normalized_dict, format="gemini"):
         response = create_health_check_response(format="gemini")
         return JSONResponse(content=response)
+
+    # Map thinkingLevel → tier suffix before blind alias mapping
+    model = apply_thinking_level_model_suffix(model, normalized_dict.get("generationConfig"))
 
     # 应用自定义模型别名映射
     model = await apply_custom_model_mapping(model)
@@ -149,6 +153,12 @@ async def stream_generate_content(
 
     # 转换为字典
     normalized_dict = model_to_dict(gemini_request)
+
+    # Map thinkingLevel → -high/-medium/-low BEFORE blind alias mapping
+    model = apply_thinking_level_model_suffix(model, normalized_dict.get("generationConfig"))
+
+    # 应用自定义模型别名映射（与非流式 generate_content 对齐）
+    model = await apply_custom_model_mapping(model)
 
     # 处理模型名称和功能检测
     use_fake_streaming = is_fake_streaming_model(model)

@@ -355,7 +355,49 @@ async def wrap_cli_request(
     if "mode" not in func_config:
         func_config["mode"] = "VALIDATED"
     tool_config["functionCallingConfig"] = func_config
+    # Required when Built-in tools are mixed with Function calling.
+    # Send both camelCase (REST JSON) and snake_case (proto-style) for Cloud Code compatibility.
+    tool_config["includeServerSideToolInvocations"] = True
+    tool_config["include_server_side_tool_invocations"] = True
     inner["toolConfig"] = tool_config
+
+    # When custom functionDeclarations are present, strip native Gemini built-in tool
+    # entries (googleSearch/codeExecution/urlContext/computerUse/googleMaps/fileSearch).
+    # v1internal often rejects mixing them with functionDeclarations even with the flag.
+    tools = inner.get("tools")
+    if isinstance(tools, list):
+        builtin_keys = {
+            "googleSearch", "google_search",
+            "googleSearchRetrieval", "google_search_retrieval",
+            "codeExecution", "code_execution",
+            "urlContext", "url_context",
+            "computerUse", "computer_use",
+            "googleMaps", "google_maps",
+            "fileSearch", "file_search",
+        }
+        has_func_decls = any(
+            isinstance(t, dict) and (t.get("functionDeclarations") or t.get("function_declarations"))
+            for t in tools
+        )
+        if has_func_decls:
+            cleaned = []
+            stripped = []
+            for t in tools:
+                if not isinstance(t, dict):
+                    cleaned.append(t)
+                    continue
+                hit = [k for k in builtin_keys if k in t]
+                if hit and not (t.get("functionDeclarations") or t.get("function_declarations")):
+                    stripped.extend(hit)
+                    continue
+                # Also drop builtin keys if mixed into same tool object with decls
+                if hit and (t.get("functionDeclarations") or t.get("function_declarations")):
+                    t = {k: v for k, v in t.items() if k not in builtin_keys}
+                    stripped.extend(hit)
+                cleaned.append(t)
+            if stripped:
+                log.warning(f"[ANTIGRAVITY] Stripped built-in tools alongside functionDeclarations: {stripped}")
+            inner["tools"] = cleaned
 
     request_id = _generate_request_id(state.conversation_id, state.trajectory_id, state.step_index)
 
@@ -369,6 +411,24 @@ async def wrap_cli_request(
     }
     if enable_credit:
         payload["enabledCreditTypes"] = ["GOOGLE_ONE_AI"]
+
+    # Optional FINAL payload dump (DEBUG_DUMP_PAYLOAD) — after wrap, shows what Google receives.
+    try:
+        if await get_debug_dump_payload_enabled():
+            dump_file = project_root / "debug_final_payload.json"
+            with open(dump_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            tc = (payload.get("request") or {}).get("toolConfig")
+            tool_summary = []
+            for t in ((payload.get("request") or {}).get("tools") or []):
+                if isinstance(t, dict):
+                    keys = [k for k in t.keys() if k != "functionDeclarations"]
+                    decls = t.get("functionDeclarations") or []
+                    tool_summary.append({"keys": keys, "decl_count": len(decls), "decl_names": [d.get("name") for d in decls[:5]]})
+            log.info(f"[DEBUG DUMP] FINAL payload -> {dump_file} toolConfig={tc} tools={tool_summary}")
+    except Exception as e:
+        log.warning(f"[DEBUG DUMP] final payload dump failed: {e}")
+
     return payload, request_id
 
 

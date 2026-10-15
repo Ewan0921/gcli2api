@@ -82,6 +82,75 @@ def get_base_model_from_feature_model(model_name: str) -> str:
     return model_name
 
 
+
+def extract_thinking_level(generation_config) -> str | None:
+    """Extract normalized thinking level (low|medium|high) from generationConfig if present."""
+    if not isinstance(generation_config, dict):
+        return None
+    tc = generation_config.get("thinkingConfig") or generation_config.get("thinking_config") or {}
+    if not isinstance(tc, dict):
+        return None
+    raw = tc.get("thinkingLevel") or tc.get("thinking_level")
+    if raw is None:
+        return None
+    level = str(raw).strip().lower()
+    # ai-sdk / Google may send HIGH/MEDIUM/LOW or high/medium/low; minimal→low
+    if level in ("high", "xhigh"):
+        return "high"
+    if level in ("medium", "med"):
+        return "medium"
+    if level in ("low", "minimal", "min"):
+        return "low"
+    return None
+
+
+def apply_thinking_level_model_suffix(model_name: str, generation_config) -> str:
+    """
+    When inbound model is a bare gemini-3.x-flash (no -high/-medium/-low/-minimal suffix)
+    and thinkingConfig.thinkingLevel is present, rewrite to gemini-3.x-flash-{level}.
+    Does nothing if model already has a tier suffix or level is absent.
+    """
+    if not model_name:
+        return model_name
+
+    # Preserve feature prefixes
+    prefix = ""
+    clean = model_name
+    for p in ["假流式/", "流式抗截断/"]:
+        if model_name.startswith(p):
+            prefix = p
+            clean = model_name[len(p):]
+            break
+
+    lower = clean.lower()
+    # Already tiered
+    for suf in ("-high", "-medium", "-low", "-minimal"):
+        if lower.endswith(suf):
+            return model_name
+
+    # Only gemini-3 flash family (and optionally pro) without tier
+    # Match gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, gemini-3-flash
+    import re
+    m = re.match(r"^(gemini-3(?:\.\d+)?-flash)(-preview)?$", lower)
+    if not m:
+        # also allow ant-gemini-* bare aliases later via mapping; here only bare flash ids
+        return model_name
+
+    level = extract_thinking_level(generation_config)
+    base = m.group(1)
+    from log import log
+    if not level:
+        # Antigravity requires a tiered model id; Google default for 3.8 flash is medium.
+        # Only applies when client omitted thinkingLevel entirely.
+        new_model = f"{base}-medium"
+        log.info(f"[THINKING-MAP] {model_name} has no thinkingLevel; default -> {prefix}{new_model}")
+        return f"{prefix}{new_model}"
+
+    new_model = f"{base}-{level}"
+    log.info(f"[THINKING-MAP] {model_name} + thinkingLevel={level} -> {prefix}{new_model}")
+    return f"{prefix}{new_model}"
+
+
 async def apply_custom_model_mapping(model_name: str) -> str:
     """
     应用自定义模型别名映射。

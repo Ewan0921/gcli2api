@@ -184,16 +184,21 @@ if path_prefix:
 
 # 挂载路由器
 # Antigravity路由 - 处理OpenAI格式请求并转换为Antigravity API
+# 同时挂载 /antigravity 前缀以兼容本地历史客户端（9router/cline 等）
 app.include_router(antigravity_openai_router, prefix="", tags=["Antigravity OpenAI API"])
+app.include_router(antigravity_openai_router, prefix="/antigravity", tags=["Antigravity OpenAI API (legacy prefix)"])
 
 # Antigravity路由 - 处理Gemini格式请求并转换为Antigravity API
 app.include_router(antigravity_gemini_router, prefix="", tags=["Antigravity Gemini API"])
+app.include_router(antigravity_gemini_router, prefix="/antigravity", tags=["Antigravity Gemini API (legacy prefix)"])
 
 # Antigravity模型列表路由 - 处理Gemini格式的模型列表请求
 app.include_router(antigravity_model_list_router, prefix="", tags=["Antigravity Model List"])
+app.include_router(antigravity_model_list_router, prefix="/antigravity", tags=["Antigravity Model List (legacy prefix)"])
 
 # Antigravity Anthropic Messages 路由 - Anthropic Messages 格式兼容
 app.include_router(antigravity_anthropic_router, prefix="", tags=["Antigravity Anthropic Messages"])
+app.include_router(antigravity_anthropic_router, prefix="/antigravity", tags=["Antigravity Anthropic Messages (legacy prefix)"])
 
 # Panel路由 - 包含认证、凭证管理和控制面板功能
 app.include_router(panel_router, prefix="", tags=["Panel Interface"])

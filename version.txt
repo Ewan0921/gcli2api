@@ -1,4 +1,4 @@
-full_hash=c597643c1aba49a53493d75734d86bab54f9aae1
-short_hash=c597643
-message=Update antigravity_fix.py
-date=2026-10-16 10:32:23 +0800
+full_hash=9a3d74055a8dff64eec1dd3933822b5bdf7623c9
+short_hash=9a3d740
+message=更新版本
+date=2026-11-01 23:37:54 +0800

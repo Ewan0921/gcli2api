@@ -6,6 +6,7 @@
 *.toml
 !pyproject.toml
 creds/
+data/
 CLAUDE.md
 GEMINI.md
 .kiro
@@ -22,7 +23,8 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+!dist/
+!dist/**
 downloads/
 eggs/
 .eggs/
@@ -38,6 +40,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Node (frontend)
+frontend/node_modules/
 
 # PyInstaller
 *.manifest
@@ -99,4 +104,3 @@ log.txt
 tools/
 aicode/
 streamchat/
-tests/

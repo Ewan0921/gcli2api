@@ -1,4 +1,6 @@
-from typing import Any, Dict, List, Optional
+from typing import Optional
+
+import httpx
 
 from config import get_api_password, get_panel_password
 from fastapi import Depends, HTTPException, Header, Query, Request, status
@@ -10,28 +12,45 @@ security = HTTPBearer()
 
 # ====================== OAuth Configuration ======================
 
-def get_geminicli_user_agent(model: str = "") -> str:
-    """生成动态 User-Agent: GeminiCLI/{version}/{model} ({platform}; {arch}; {surface})"""
-    if model:
-         return f"Mozilla/5.0 (compatible; Google-Gemini-CLI/1.0; +https://github.com/google-gemini/gemini-cli) {model}"
-    return f"Mozilla/5.0 (compatible; Google-Gemini-CLI/1.0; +https://github.com/google-gemini/gemini-cli)"
-
-# 静态常量
-GEMINICLI_USER_AGENT = get_geminicli_user_agent()
-
 # Antigravity CLI 客户端仿真常量
-ANTIGRAVITY_CLI_VERSION = "1.3.1"
+_DEFAULT_ANTIGRAVITY_CLI_VERSION = "1.4.12"
+_LATEST_RELEASE_URL = (
+    "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest"
+)
+
+
+def _get_latest_antigravity_cli_version() -> str:
+    """获取最新 Antigravity CLI 版本；获取失败时返回默认版本。"""
+    try:
+        response = httpx.get(
+            _LATEST_RELEASE_URL,
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        release_data = response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        log.warning(
+            "获取最新 Antigravity CLI 版本失败，使用默认版本 "
+            f"{_DEFAULT_ANTIGRAVITY_CLI_VERSION}: {error}"
+        )
+        return _DEFAULT_ANTIGRAVITY_CLI_VERSION
+
+    tag_name = release_data.get("tag_name") if isinstance(release_data, dict) else None
+    if not isinstance(tag_name, str) or not tag_name.strip():
+        log.warning(
+            "GitHub API 响应中没有有效的 tag_name，使用默认版本 "
+            f"{_DEFAULT_ANTIGRAVITY_CLI_VERSION}"
+        )
+        return _DEFAULT_ANTIGRAVITY_CLI_VERSION
+
+    return tag_name.strip().lstrip("vV")
+
+
+ANTIGRAVITY_CLI_VERSION = _get_latest_antigravity_cli_version()
 ANTIGRAVITY_CLI_PLATFORM = "windows/amd64"
 ANTIGRAVITY_USER_AGENT = f"antigravity/cli/{ANTIGRAVITY_CLI_VERSION} {ANTIGRAVITY_CLI_PLATFORM}"
-
-# OAuth Configuration - 标准模式
-CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-CLIENT_SECRET = "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"
-SCOPES = [
-    "https://www.googleapis.com/auth/cloud-platform",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-]
+log.info(f"当前 Antigravity CLI 版本: {ANTIGRAVITY_CLI_VERSION}")
 
 # Antigravity OAuth Configuration
 ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
@@ -50,38 +69,22 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 # 回调服务器配置
 CALLBACK_HOST = "localhost"
 
-# Model name lists for different features
-BASE_MODELS = [
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash",
-    "gemini-3.8-flash",
-]
-
-
 # ====================== Model Helper Functions ======================
 
-def is_fake_streaming_model(model_name: str) -> bool:
-    """Check if model name indicates fake streaming should be used."""
-    return model_name.startswith("假流式/")
+# 抗截断模型前缀
+_ANTI_TRUNCATION_PREFIX = "抗截断-"
 
 
 def is_anti_truncation_model(model_name: str) -> bool:
     """Check if model name indicates anti-truncation should be used."""
-    return model_name.startswith("抗截断/")
+    return model_name.startswith(_ANTI_TRUNCATION_PREFIX)
 
 
 def get_base_model_from_feature_model(model_name: str) -> str:
     """Get base model name from feature model name."""
-    # Remove feature prefixes
-    for prefix in ["假流式/", "抗截断/", "流式抗截断/"]:
-        if model_name.startswith(prefix):
-            return model_name[len(prefix) :]
+    if model_name.startswith(_ANTI_TRUNCATION_PREFIX):
+        return model_name[len(_ANTI_TRUNCATION_PREFIX) :]
     return model_name
-
 
 
 def extract_thinking_level(generation_config) -> str | None:
@@ -109,40 +112,33 @@ def apply_thinking_level_model_suffix(model_name: str, generation_config) -> str
     """
     When inbound model is a bare gemini-3.x-flash (no -high/-medium/-low/-minimal suffix)
     and thinkingConfig.thinkingLevel is present, rewrite to gemini-3.x-flash-{level}.
-    Does nothing if model already has a tier suffix or level is absent.
+    If level absent, default to -medium (Antigravity requires a tiered model id).
     """
     if not model_name:
         return model_name
 
-    # Preserve feature prefixes
+    # Preserve feature prefixes (legacy slash form + upstream hyphen form)
     prefix = ""
     clean = model_name
-    for p in ["假流式/", "流式抗截断/"]:
+    for p in ["假流式/", "流式抗截断/", "抗截断/", "抗截断-"]:
         if model_name.startswith(p):
             prefix = p
             clean = model_name[len(p):]
             break
 
     lower = clean.lower()
-    # Already tiered
     for suf in ("-high", "-medium", "-low", "-minimal"):
         if lower.endswith(suf):
             return model_name
 
-    # Only gemini-3 flash family (and optionally pro) without tier
-    # Match gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, gemini-3-flash
-    import re
-    m = re.match(r"^(gemini-3(?:\.\d+)?-flash)(-preview)?$", lower)
+    import re as _re
+    m = _re.match(r"^(gemini-3(?:\.\d+)?-flash)(-preview)?$", lower)
     if not m:
-        # also allow ant-gemini-* bare aliases later via mapping; here only bare flash ids
         return model_name
 
     level = extract_thinking_level(generation_config)
     base = m.group(1)
-    from log import log
     if not level:
-        # Antigravity requires a tiered model id; Google default for 3.8 flash is medium.
-        # Only applies when client omitted thinkingLevel entirely.
         new_model = f"{base}-medium"
         log.info(f"[THINKING-MAP] {model_name} has no thinkingLevel; default -> {prefix}{new_model}")
         return f"{prefix}{new_model}"
@@ -153,12 +149,7 @@ def apply_thinking_level_model_suffix(model_name: str, generation_config) -> str
 
 
 async def apply_custom_model_mapping(model_name: str) -> str:
-    """
-    应用自定义模型别名映射。
-    若存在配置文件/环境变量且命中别名，则替换为映射目标；
-    若包含功能前缀（如 '假流式/'），替换后保留前缀；
-    若未命中或无配置，原样返回。
-    """
+    """Apply custom model alias mapping from MODEL_MAP env or model_mappings.json."""
     if not model_name:
         return model_name
 
@@ -167,21 +158,18 @@ async def apply_custom_model_mapping(model_name: str) -> str:
     if not mappings:
         return model_name
 
-    # 提取功能前缀
     prefix = ""
     clean_model = model_name
-    for p in ["假流式/", "流式抗截断/"]:
+    for p in ["假流式/", "流式抗截断/", "抗截断/", "抗截断-"]:
         if model_name.startswith(p):
             prefix = p
-            clean_model = model_name[len(p) :]
+            clean_model = model_name[len(p):]
             break
 
-    # 匹配 (支持精确匹配和大小写不敏感匹配)
     target_model = None
     if clean_model in mappings:
         target_model = mappings[clean_model]
     else:
-        # 大小写不敏感查找
         clean_model_lower = clean_model.lower()
         for k, v in mappings.items():
             if k.lower() == clean_model_lower:
@@ -194,66 +182,6 @@ async def apply_custom_model_mapping(model_name: str) -> str:
 
     return model_name
 
-
-
-def get_available_models(router_type: str = "openai") -> List[str]:
-    """
-    Get available models with feature prefixes.
-
-    Args:
-        router_type: "openai" or "gemini"
-
-    Returns:
-        List of model names with feature prefixes
-    """
-    models = []
-
-    for base_model in BASE_MODELS:
-        # 基础模型
-        models.append(base_model)
-
-        # 假流式模型 (前缀格式)
-        models.append(f"假流式/{base_model}")
-
-        # 抗截断模型 (前缀格式)
-        models.append(f"抗截断/{base_model}")
-
-        # 定义思考后缀（根据模型系列不同）
-        thinking_suffixes = []
-
-        # Gemini 2.5 系列: 使用思考预算后缀
-        if "gemini-2.5" in base_model:
-            thinking_suffixes = ["-max", "-high", "-medium", "-low", "-minimal"]
-        # Gemini 3 系列: 使用思考等级后缀
-        elif "gemini-3" in base_model:
-            if "flash" in base_model:
-                # 3-flash-preview: 支持 high/medium/low/minimal
-                thinking_suffixes = ["-high", "-medium", "-low", "-minimal"]
-            elif "pro" in base_model:
-                # 3-pro-preview: 支持 high/low
-                thinking_suffixes = ["-high", "-low"]
-
-        search_suffix = "-search"
-
-        # 1. 单独的 thinking 后缀
-        for thinking_suffix in thinking_suffixes:
-            models.append(f"{base_model}{thinking_suffix}")
-            models.append(f"假流式/{base_model}{thinking_suffix}")
-            models.append(f"抗截断/{base_model}{thinking_suffix}")
-
-        # 2. 单独的 search 后缀
-        models.append(f"{base_model}{search_suffix}")
-        models.append(f"假流式/{base_model}{search_suffix}")
-        models.append(f"抗截断/{base_model}{search_suffix}")
-
-        # 3. thinking + search 组合后缀
-        for thinking_suffix in thinking_suffixes:
-            combined_suffix = f"{thinking_suffix}{search_suffix}"
-            models.append(f"{base_model}{combined_suffix}")
-            models.append(f"假流式/{base_model}{combined_suffix}")
-            models.append(f"抗截断/{base_model}{combined_suffix}")
-
-    return models
 
 
 # ====================== Authentication Functions ======================
@@ -396,78 +324,3 @@ async def verify_panel_token(credentials: HTTPAuthorizationCredentials = Depends
     if credentials.credentials != password:
         raise HTTPException(status_code=401, detail="密码错误")
     return credentials.credentials
-
-
-def record_request_log_async(
-    email: Optional[str],
-    mode: str,
-    model: str,
-    usage_metadata: Optional[Dict[str, Any]],
-):
-    """
-    后台安全异步记录请求日志及 Token 消耗，防阻塞。
-    """
-    if not usage_metadata or not isinstance(usage_metadata, dict):
-        return
-
-    prompt_tokens = int(usage_metadata.get("promptTokenCount", 0) or 0)
-    cached_tokens = int(usage_metadata.get("cachedContentTokenCount", 0) or 0)
-    output_tokens = int(usage_metadata.get("candidatesTokenCount", 0) or 0)
-    uncached_tokens = max(prompt_tokens - cached_tokens, 0)
-    total_tokens = int(
-        usage_metadata.get("totalTokenCount", prompt_tokens + output_tokens)
-        or (prompt_tokens + output_tokens)
-    )
-
-    if prompt_tokens > 0 or output_tokens > 0 or cached_tokens > 0:
-        async def _worker():
-            try:
-                from src.storage_adapter import get_storage_adapter
-
-                adapter = await get_storage_adapter()
-                await adapter.add_request_log(
-                    email=email,
-                    mode=mode,
-                    model=model,
-                    input_tokens=prompt_tokens,
-                    output_tokens=output_tokens,
-                    cached_tokens=cached_tokens,
-                    uncached_tokens=uncached_tokens,
-                    total_tokens=total_tokens,
-                )
-            except Exception as e:
-                log.warning(f"Async record_request_log_async worker failed: {e}")
-
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_worker())
-        except RuntimeError:
-            try:
-                import threading
-                threading.Thread(target=lambda: asyncio.run(_worker()), daemon=True).start()
-            except Exception as e:
-                log.warning(f"Async record_request_log_async failed: {e}")
-
-
-from datetime import datetime, timezone, timedelta
-from typing import Tuple
-
-CHINA_TZ = timezone(timedelta(hours=8))
-
-
-def get_timezone_timestamp_range(date_str: str, tz_offset_hours: int = 8) -> Tuple[float, float]:
-    """
-    将给定的 date_str (YYYY-MM-DD) 解析为指定时区（默认 UTC+8 北京时间）下的 00:00:00.000000 至 23:59:59.999999 的 Unix 时间戳范围
-    """
-    tz = timezone(timedelta(hours=tz_offset_hours))
-    try:
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        dt_start = dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
-        dt_end = dt.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
-        return dt_start.timestamp(), dt_end.timestamp()
-    except Exception:
-        now = datetime.now(tz=tz)
-        dt_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        dt_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return dt_start.timestamp(), dt_end.timestamp()
